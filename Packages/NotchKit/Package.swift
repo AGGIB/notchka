@@ -12,5 +12,6 @@ let package = Package(
         .target(name: "NotchCore"),
         .target(name: "NotchUI", dependencies: ["NotchCore"]),
         .testTarget(name: "NotchCoreTests", dependencies: ["NotchCore"]),
+        .testTarget(name: "NotchUITests", dependencies: ["NotchUI"]),
     ]
 )
