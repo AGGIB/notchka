@@ -65,28 +65,26 @@ find vendor/mediaremote-adapter -name '*.pl'
 
 - [ ] **Step 2: Собрать MediaRemoteAdapter.framework**
 
-Посмотри доступные схемы, затем собери релизную конфигурацию:
+Репозиторий собирается через **CMake** — Xcode-проекта и `Package.swift` в нём нет.
 
 ```bash
 cd vendor/mediaremote-adapter
-xcodebuild -list
-xcodebuild -scheme MediaRemoteAdapter -configuration Release -derivedDataPath .build build
-find .build -name 'MediaRemoteAdapter.framework' -maxdepth 6
+cmake -S . -B .build -DCMAKE_BUILD_TYPE=Release
+cmake --build .build
 cd -
+ls -d vendor/mediaremote-adapter/.build/MediaRemoteAdapter.framework
 ```
 
-Если схема называется иначе — возьми имя из вывода `xcodebuild -list`. Если в репозитории
-нет Xcode-проекта, а есть `Package.swift`, собирай через `swift build -c release` и ищи
-фреймворк в `.build/release`.
-
-Ожидается: путь вида `vendor/mediaremote-adapter/.build/Build/Products/Release/MediaRemoteAdapter.framework`.
-Запиши его в переменную для следующих шагов.
+Ожидается: `vendor/mediaremote-adapter/.build/MediaRemoteAdapter.framework`, около 5 МБ.
 
 - [ ] **Step 3: Проверить работоспособность адаптера**
 
+Пути обязаны быть **абсолютными**: с относительными адаптер падает с
+`Failed to load framework`. Это не придирка стиля, а требование самого бриджа.
+
 ```bash
-ADAPTER_PL=$(find vendor/mediaremote-adapter -name '*.pl' | head -1)
-ADAPTER_FRAMEWORK=$(find vendor/mediaremote-adapter -name 'MediaRemoteAdapter.framework' | head -1)
+ADAPTER_PL="$PWD/vendor/mediaremote-adapter/bin/mediaremote-adapter.pl"
+ADAPTER_FRAMEWORK="$PWD/vendor/mediaremote-adapter/.build/MediaRemoteAdapter.framework"
 /usr/bin/perl "$ADAPTER_PL" "$ADAPTER_FRAMEWORK" test; echo "exit=$?"
 ```
 
