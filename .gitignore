@@ -16,3 +16,6 @@ Package.resolved
 
 # Brainstorming companion (локальные мокапы сессии)
 .superpowers/
+
+# Артефакты сборки вендоренного адаптера
+vendor/mediaremote-adapter/.build/
