@@ -824,7 +824,12 @@ public struct NotchStateMachine: Sendable {
 - [ ] **Step 5: Запустить тесты и убедиться, что они проходят**
 
 Run: `swift test --package-path Packages/NotchKit --filter NotchStateMachineTests`
-Expected: PASS, 13 тестов
+Expected: PASS, 14 тестов
+
+Четырнадцатый тест добавлен после ревью: строка таблицы «peek + хоткей →
+expanded(последняя вкладка)» была реализована, но не покрыта. Он должен
+уводить `lastTab` на вкладку, отличную от `.music`, иначе не отличит
+правильное поведение от подстановки музыки по умолчанию.
 
 - [ ] **Step 6: Закоммитить**
 
@@ -851,7 +856,15 @@ git commit -m "feat: машина состояний панели с полно�
   - `HoverDebouncer.enterDwell = 0.120`, `.exitGrace = 0.250`
   - `mutating func cursorMoved(isInsideHotZone: Bool, at: Date) -> NotchEvent?`
   - `mutating func tick(at: Date) -> NotchEvent?`
-  - `var hasPendingTransition: Bool` — по нему Task 7 решает, нужен ли таймер
+  - `var hasPendingTransition: Bool` — по нему Task 8 решает, нужен ли таймер
+
+**Инвариант, на который опирается машина состояний.** События входа и выхода
+всегда парны: `.cursorLeftHotZone` испускается только после того, как был
+испущен `.cursorEnteredHotZone`. Машина из Task 4 обрабатывает выход курсора
+лишь из `peek(.hover)`; если бы дебаунсер мог выдать одиночный выход во время
+автопика по смене трека, событие молча провалилось бы в `default`. Поле
+`reported` и есть носитель этого инварианта — оно хранит то, о чём уже
+сообщили наружу, и переход обратно возможен только из сообщённого состояния.
 
 - [ ] **Step 1: Написать падающие тесты**
 
@@ -1835,7 +1848,7 @@ git commit -m "feat: единые параметры движения и под�
 swift test --package-path Packages/NotchKit
 ```
 
-Expected: PASS, 31 тест (4 геометрия + 13 машина + 6 пороги + 5 форма + 3 движение)
+Expected: PASS, 32 теста (4 геометрия + 14 машина + 6 пороги + 5 форма + 3 движение)
 
 - [ ] **Step 2: Собрать релизную конфигурацию**
 
