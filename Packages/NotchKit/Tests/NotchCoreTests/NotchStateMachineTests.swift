@@ -94,6 +94,24 @@ func leavingFullScreenReenablesPanel() {
     #expect(machine.handle(.cursorEnteredHotZone) == .peek(.hover))
 }
 
+@Test("хоткей в peek разворачивает на последнюю вкладку, отличаясь от клика")
+func hotkeyInPeekUsesLastTabClickAlwaysMusic() {
+    var machine = NotchStateMachine()
+    // Set lastTab to something other than default
+    machine.handle(.hotkey)  // Expand to .music
+    machine.handle(.selectTab(.notes))  // Change to .notes, updating lastTab
+    machine.handle(.dismiss)  // Close but keep lastTab as .notes
+
+    // Test hotkey in peek: should use lastTab (.notes), not .music
+    machine.handle(.cursorEnteredHotZone)  // Enter peek
+    #expect(machine.handle(.hotkey) == .expanded(.notes))
+
+    // Test click in peek: should always use .music, regardless of lastTab
+    machine.handle(.dismiss)  // Close the expansion
+    machine.handle(.trackChanged)  // Re-enter peek with .trackChanged reason
+    #expect(machine.handle(.click) == .expanded(.music))
+}
+
 @Test("повторное событие без смены состояния не сообщается")
 func idempotentEventsReturnNil() {
     var machine = NotchStateMachine()
