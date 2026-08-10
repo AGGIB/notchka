@@ -5,11 +5,16 @@ import CoreGraphics
 /// конфигурациях, которых нет под рукой.
 public struct ScreenMetrics: Sendable, Equatable {
     public let frame: CGRect
-    /// Высота выреза. На экранах без чёлки равна нулю.
+    /// Высота выреза — нулевое значение означает экран без чёлки.
+    /// В macOS это получается из NSScreen.safeAreaInsets.top (крайний слева).
     public let safeAreaTopInset: CGFloat
     /// Ширина полосы меню-бара слева от выреза.
+    /// macOS не предоставляет прямого API ширины выреза, поэтому мы вычисляем
+    /// ширину вычитанием боковых областей из ширины экрана.
     public let auxiliaryTopLeftWidth: CGFloat
     /// Ширина полосы меню-бара справа от выреза.
+    /// Вместе с auxiliaryTopLeftWidth позволяет вычислить положение и ширину выреза:
+    /// notchX = auxiliaryTopLeftWidth, notchWidth = frame.width - left - right.
     public let auxiliaryTopRightWidth: CGFloat
 
     public init(
