@@ -16,9 +16,19 @@ cmake -S . -B .build -DCMAKE_BUILD_TYPE=Release
 cmake --build .build
 ```
 
-Результат сборки: `vendor/mediaremote-adapter/.build/MediaRemoteAdapter.framework`
-(~5 МБ). Пересборка в этом заходе не требовалась — фреймворк уже был
-собран предыдущей попыткой и подтверждён рабочим (`test` → `exit=0`).
+Результат сборки: `vendor/mediaremote-adapter/.build/MediaRemoteAdapter.framework`.
+Пересборка в этом заходе не требовалась — фреймворк уже был собран
+предыдущей попыткой и подтверждён рабочим (`test` → `exit=0`).
+
+Реальный размер на диске (измерено, не оценка из плана): `du -sh` — 300K.
+Сумма байт настоящих файлов бандла (`find … -type f`) — 301 098 Б ≈ 294 КБ:
+бинарник `Versions/A/MediaRemoteAdapter` 297 808 Б,
+`Versions/A/_CodeSignature/CodeResources` 2 442 Б,
+`Versions/A/Resources/Info.plist` 848 Б. `du -shL` (со следованием по
+символьным ссылкам `Versions/Current → A`, `Resources` и
+`MediaRemoteAdapter` в корне бандла) даёт 896K — эта цифра задваивает
+одно и то же содержимое через несколько симлинков и не отражает
+реальный объём данных на диске.
 
 Пути к `.pl`-скрипту и к `.framework`, которые передаются адаптеру, обязаны
 быть **абсолютными**. С относительными путями бридж падает с
