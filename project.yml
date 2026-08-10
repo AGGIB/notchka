@@ -1,0 +1,39 @@
+name: Notchka
+options:
+  bundleIdPrefix: kz.mobilefirst
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+packages:
+  NotchKit:
+    path: Packages/NotchKit
+
+targets:
+  Notchka:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    dependencies:
+      - package: NotchKit
+        product: NotchCore
+      - package: NotchKit
+        product: NotchUI
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleName: Notchka
+        LSUIElement: true
+        LSMinimumSystemVersion: "26.0"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: kz.mobilefirst.notchka
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: NO

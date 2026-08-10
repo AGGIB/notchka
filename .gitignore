@@ -19,3 +19,6 @@ Package.resolved
 
 # Артефакты сборки вендоренного адаптера
 vendor/mediaremote-adapter/.build/
+
+# XcodeGen генерирует проект из project.yml
+Notchka.xcodeproj/
