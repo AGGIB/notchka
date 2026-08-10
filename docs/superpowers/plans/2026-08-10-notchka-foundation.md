@@ -201,8 +201,8 @@ git commit -m "chore: вендоринг mediaremote-adapter и спайк чт�
 **Files:**
 - Create: `project.yml`
 - Create: `Packages/NotchKit/Package.swift`
-- Create: `Packages/NotchKit/Sources/NotchCore/NotchKitVersion.swift`
-- Create: `Packages/NotchKit/Tests/NotchCoreTests/SmokeTests.swift`
+- Create: `Packages/NotchKit/Sources/NotchCore/NotchCorePlaceholder.swift`
+- Create: `Packages/NotchKit/Sources/NotchUI/NotchUIPlaceholder.swift`
 - Create: `App/AppDelegate.swift`
 - Create: `App/Info.plist`
 - Modify: `.gitignore`
@@ -210,7 +210,12 @@ git commit -m "chore: вендоринг mediaremote-adapter и спайк чт�
 **Interfaces:**
 - Consumes: ничего
 - Produces: собираемый app-таргет `Notchka` и библиотеки `NotchCore`, `NotchUI`;
-  команды сборки и тестов, которыми пользуются все последующие задачи.
+  команды сборки, которыми пользуются все последующие задачи.
+
+Задача строительная: в ней нет тестов, потому что нечего проверять, кроме
+успешной сборки. Тест-таргеты объявляются там, где появляются настоящие тесты:
+`NotchCoreTests` в Task 3, `NotchUITests` в Task 6. Пустой тест-таргет SPM
+не соберёт, поэтому объявлять их заранее нельзя.
 
 - [ ] **Step 1: Установить XcodeGen**
 
@@ -240,57 +245,38 @@ let package = Package(
     targets: [
         .target(name: "NotchCore"),
         .target(name: "NotchUI", dependencies: ["NotchCore"]),
-        .testTarget(name: "NotchCoreTests", dependencies: ["NotchCore"]),
-        .testTarget(name: "NotchUITests", dependencies: ["NotchUI"]),
     ]
 )
 ```
 
-- [ ] **Step 3: Написать падающий смоук-тест**
+- [ ] **Step 3: Создать заглушки таргетов**
 
-Создай `Packages/NotchKit/Tests/NotchCoreTests/SmokeTests.swift`:
+SPM не собирает таргет без единого исходника, а настоящих типов тут ещё нет.
+Обе заглушки удаляются в задачах, которые приносят первый настоящий файл.
+
+Создай `Packages/NotchKit/Sources/NotchCore/NotchCorePlaceholder.swift`:
 
 ```swift
-import Testing
-@testable import NotchCore
-
-@Test("пакет собирается и версия доступна")
-func packageVersionIsAvailable() {
-    #expect(NotchKitVersion.current == "1")
-}
+/// Заглушка таргета. Удаляется в Task 3, когда появляется ScreenMetrics.
+enum NotchCorePlaceholder {}
 ```
 
-- [ ] **Step 4: Запустить тест и убедиться, что он падает**
-
-Run: `swift test --package-path Packages/NotchKit`
-Expected: FAIL — `cannot find 'NotchKitVersion' in scope`
-
-- [ ] **Step 5: Написать минимальную реализацию**
-
-Создай `Packages/NotchKit/Sources/NotchCore/NotchKitVersion.swift`:
+Создай `Packages/NotchKit/Sources/NotchUI/NotchUIPlaceholder.swift`:
 
 ```swift
-/// Маркер сборки пакета. Существует, чтобы смоук-тест имел что проверять,
-/// пока в NotchCore нет настоящих типов.
-public enum NotchKitVersion {
-    public static let current = "1"
-}
-```
-
-Создай пустой файл-заглушку, чтобы таргет `NotchUI` собирался:
-`Packages/NotchKit/Sources/NotchUI/NotchUIPlaceholder.swift`
-
-```swift
-/// Заглушка таргета. Удаляется в Task 8, когда появляется NotchShape.
+/// Заглушка таргета. Удаляется в Task 6, когда появляется NotchShape.
 enum NotchUIPlaceholder {}
 ```
 
-- [ ] **Step 6: Запустить тест и убедиться, что он проходит**
+- [ ] **Step 4: Убедиться, что пакет собирается**
 
-Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS, 1 тест
+Run: `swift build --package-path Packages/NotchKit`
+Expected: `Build complete`, ноль предупреждений
 
-- [ ] **Step 7: Описать app-таргет**
+Тестов в этой задаче нет и быть не может: проверять здесь нечего, кроме факта
+сборки. Первый настоящий красно-зелёный цикл начинается в Task 3.
+
+- [ ] **Step 5: Описать app-таргет**
 
 Создай `project.yml`:
 
@@ -336,7 +322,7 @@ targets:
         ENABLE_USER_SCRIPT_SANDBOXING: NO
 ```
 
-- [ ] **Step 8: Написать точку входа**
+- [ ] **Step 6: Написать точку входа**
 
 Создай `App/AppDelegate.swift`:
 
@@ -361,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 ```
 
-- [ ] **Step 9: Сгенерировать проект и собрать**
+- [ ] **Step 7: Сгенерировать проект и собрать**
 
 ```bash
 xcodegen generate
@@ -371,7 +357,7 @@ xcodebuild -project Notchka.xcodeproj -scheme Notchka -configuration Debug \
 
 Expected: `** BUILD SUCCEEDED **`
 
-- [ ] **Step 10: Проверить, что приложение запускается агентом**
+- [ ] **Step 8: Проверить, что приложение запускается агентом**
 
 ```bash
 open build/Build/Products/Debug/Notchka.app
@@ -385,7 +371,7 @@ Expected: процесс найден, иконка в Dock **не появил�
 pkill -x Notchka
 ```
 
-- [ ] **Step 11: Закоммитить**
+- [ ] **Step 9: Закоммитить**
 
 Добавь в `.gitignore`:
 
@@ -409,6 +395,8 @@ git commit -m "feat: скелет проекта — app-таргет Notchka и
 **Files:**
 - Create: `Packages/NotchKit/Sources/NotchCore/ScreenMetrics.swift`
 - Create: `Packages/NotchKit/Sources/NotchCore/NotchGeometry.swift`
+- Delete: `Packages/NotchKit/Sources/NotchCore/NotchCorePlaceholder.swift`
+- Modify: `Packages/NotchKit/Package.swift` — объявить тест-таргет
 - Test: `Packages/NotchKit/Tests/NotchCoreTests/NotchGeometryTests.swift`
 
 **Interfaces:**
@@ -419,7 +407,14 @@ git commit -m "feat: скелет проекта — app-таргет Notchka и
   - `NotchGeometryCalculator.geometry(for: ScreenMetrics) -> NotchGeometry?`
   - Константы `NotchGeometryCalculator.hotZoneInsetX = 6`, `.hotZoneInsetBottom = 4`
 
-- [ ] **Step 1: Написать падающие тесты**
+- [ ] **Step 1: Объявить тест-таргет и написать падающие тесты**
+
+Task 2 оставил `Package.swift` без тест-таргетов: пустой тест-таргет SPM не собирает.
+Добавь в массив `targets`:
+
+```swift
+        .testTarget(name: "NotchCoreTests", dependencies: ["NotchCore"]),
+```
 
 Создай `Packages/NotchKit/Tests/NotchCoreTests/NotchGeometryTests.swift`:
 
@@ -482,6 +477,9 @@ Run: `swift test --package-path Packages/NotchKit --filter NotchGeometryTests`
 Expected: FAIL — `cannot find 'ScreenMetrics' in scope`
 
 - [ ] **Step 3: Написать реализацию**
+
+Удали заглушку `Packages/NotchKit/Sources/NotchCore/NotchCorePlaceholder.swift` —
+в таргете появляются настоящие типы, держать её больше незачем.
 
 Создай `Packages/NotchKit/Sources/NotchCore/ScreenMetrics.swift`:
 
@@ -1004,7 +1002,14 @@ git commit -m "feat: пороги входа и выхода курсора из
 **Files:**
 - Create: `Packages/NotchKit/Sources/NotchUI/NotchShape.swift`
 - Delete: `Packages/NotchKit/Sources/NotchUI/NotchUIPlaceholder.swift`
+- Modify: `Packages/NotchKit/Package.swift` — объявить тест-таргет
 - Test: `Packages/NotchKit/Tests/NotchUITests/NotchShapeTests.swift`
+
+Перед тестами добавь в массив `targets` файла `Package.swift`:
+
+```swift
+        .testTarget(name: "NotchUITests", dependencies: ["NotchUI"]),
+```
 
 **Interfaces:**
 - Consumes: ничего
