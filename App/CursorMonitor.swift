@@ -45,6 +45,11 @@ final class CursorMonitor {
         setTicking(false)
     }
 
+    deinit {
+        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit.
+        MainActor.assumeIsolated { stop() }
+    }
+
     private func emit() {
         onSample?(NSEvent.mouseLocation, Date())
     }

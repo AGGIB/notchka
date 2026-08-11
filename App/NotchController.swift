@@ -33,6 +33,14 @@ final class NotchController {
         }
     }
 
+    deinit {
+        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit.
+        MainActor.assumeIsolated {
+            cursor.stop()
+            hotkey.unregister()
+        }
+    }
+
     func handle(_ event: NotchEvent) {
         guard machine.handle(event) != nil else { return }
         state = machine.state

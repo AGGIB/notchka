@@ -61,7 +61,16 @@ final class HotkeyCenter {
         )
 
         let id = EventHotKeyID(signature: Self.signature, id: Self.hotKeyID)
-        RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef)
+        let status = RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef)
+        guard status == noErr else {
+            // Без этого лога отказ регистрации неотличим от хоткея, который
+            // просто никто не нажимает — единственный способ узнать причину
+            // у пользователя ежедневного инструмента это системный лог.
+            NSLog(
+                "Notchka: регистрация хоткея не удалась (keyCode=\(keyCode), modifiers=\(modifiers)), OSStatus=\(status). Вероятная причина: сочетание уже занято другим приложением или системой."
+            )
+            return
+        }
     }
 
     func unregister() {
