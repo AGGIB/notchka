@@ -55,7 +55,8 @@ public struct NotchShape: Shape {
             control: CGPoint(x: right, y: bottomY)
         )
         path.addLine(to: CGPoint(x: right, y: top + concave))
-        // Правый вогнутый угол.
+        // Правый вогнутый угол: зеркало левого — стык с меню-баром должен
+        // выглядеть литым с обеих сторон, а не только слева.
         path.addQuadCurve(
             to: CGPoint(x: right + concave, y: top),
             control: CGPoint(x: right, y: top)

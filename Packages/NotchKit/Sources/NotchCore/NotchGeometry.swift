@@ -19,11 +19,17 @@ public enum NotchGeometryCalculator {
     public static let hotZoneInsetBottom: CGFloat = 4
 
     public static func geometry(for metrics: ScreenMetrics) -> NotchGeometry? {
+        // Нулевой inset значит «у этого экрана нет чёлки» (например, внешний
+        // монитор) — для него геометрии не существует, а не вырожденный
+        // прямоугольник нулевой высоты.
         guard metrics.safeAreaTopInset > 0 else { return nil }
 
         let notchWidth = metrics.frame.width
             - metrics.auxiliaryTopLeftWidth
             - metrics.auxiliaryTopRightWidth
+        // Рассинхрон боковых областей (шире самого экрана) даёт нулевую или
+        // отрицательную ширину — это невозможная геометрия, которую нельзя
+        // отдавать вызывающему как есть.
         guard notchWidth > 0 else { return nil }
 
         let notchRect = CGRect(
