@@ -1450,6 +1450,11 @@ final class CursorMonitor {
         setTicking(false)
     }
 
+    deinit {
+        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit.
+        MainActor.assumeIsolated { stop() }
+    }
+
     private func emit() {
         onSample?(NSEvent.mouseLocation, Date())
     }
@@ -1524,7 +1529,18 @@ final class HotkeyCenter {
         )
 
         let id = EventHotKeyID(signature: Self.signature, id: Self.hotKeyID)
-        RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef)
+        let status = RegisterEventHotKey(
+            keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef
+        )
+        guard status == noErr else {
+            // Без этого лога отказ регистрации неотличим от хоткея, который
+            // просто никто не нажимает — единственный способ узнать причину
+            // у пользователя ежедневного инструмента это системный лог.
+            NSLog(
+                "Notchka: регистрация хоткея не удалась (keyCode=\(keyCode), modifiers=\(modifiers)), OSStatus=\(status). Вероятная причина: сочетание уже занято другим приложением или системой."
+            )
+            return
+        }
     }
 
     func unregister() {
@@ -1581,6 +1597,14 @@ final class NotchController {
         }
     }
 
+    deinit {
+        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit.
+        MainActor.assumeIsolated {
+            cursor.stop()
+            hotkey.unregister()
+        }
+    }
+
     func handle(_ event: NotchEvent) {
         guard machine.handle(event) != nil else { return }
         state = machine.state
@@ -1588,9 +1612,20 @@ final class NotchController {
     }
 
     private func cursorSampled(at location: CGPoint, now: Date) {
-        // NSEvent.mouseLocation отсчитывается снизу вверх, а геометрия чёлки — сверху.
-        let flipped = CGPoint(x: location.x, y: screenFrame.maxY - location.y)
-        let isInside = geometry.hotZone.contains(flipped)
+        // NSEvent.mouseLocation задан в глобальных координатах AppKit: начало
+        // отсчёта — левый нижний угол всей раскладки мониторов, Y растёт вверх;
+        // это начало не обязано совпадать с левым нижним углом именно этого
+        // экрана (при нескольких дисплеях у screenFrame бывает ненулевой origin).
+        // NotchGeometry.hotZone, наоборот, всегда задана относительно своего
+        // экрана с началом в левом верхнем углу. Поэтому X переводится сдвигом
+        // на screenFrame.origin.x — переворота нет, в обеих системах X растёт
+        // вправо, — а Y вычитанием из screenFrame.maxY: здесь сдвиг и переворот
+        // совпадают в одном действии, потому что maxY уже равен origin.y + height.
+        let screenRelative = CGPoint(
+            x: location.x - screenFrame.origin.x,
+            y: screenFrame.maxY - location.y
+        )
+        let isInside = geometry.hotZone.contains(screenRelative)
 
         if let event = debouncer.cursorMoved(isInsideHotZone: isInside, at: now) {
             handle(event)
