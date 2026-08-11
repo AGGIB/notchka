@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import os
 
 /// Глобальный хоткей через Carbon. Выбран сознательно:
 /// NSEvent.addGlobalMonitorForEvents(matching: .keyDown) потребовал бы
@@ -15,6 +16,7 @@ final class HotkeyCenter {
 
     private static let signature = OSType(0x4E4F5443)  // 'NOTC'
     private static let hotKeyID: UInt32 = 1
+    private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "HotkeyCenter")
 
     /// По умолчанию ⌥Space: ⌘Space занят Spotlight.
     func register(
@@ -66,8 +68,11 @@ final class HotkeyCenter {
             // Без этого лога отказ регистрации неотличим от хоткея, который
             // просто никто не нажимает — единственный способ узнать причину
             // у пользователя ежедневного инструмента это системный лог.
-            NSLog(
-                "Notchka: регистрация хоткея не удалась (keyCode=\(keyCode), modifiers=\(modifiers)), OSStatus=\(status). Вероятная причина: сочетание уже занято другим приложением или системой."
+            // Значения помечены .public: это диагностика для Console.app,
+            // а не приватные данные пользователя — молча скрытые редакцией
+            // по умолчанию значения свели бы лог обратно к бесполезному.
+            Self.logger.error(
+                "Регистрация хоткея не удалась (keyCode=\(keyCode, privacy: .public), modifiers=\(modifiers, privacy: .public)), OSStatus=\(status, privacy: .public). Вероятная причина: сочетание уже занято другим приложением или системой."
             )
             return
         }

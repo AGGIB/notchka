@@ -8,6 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: NotchPanel?
     private var controller: NotchController?
 
+    /// Постоянный размер окна — максимум, которого панель достигает в `expanded`.
+    /// Именованная константа вместо литерала: то же значение понадобится
+    /// плану 2 при переходе на настоящее содержимое вкладок.
+    private static let maxPanelSize = CGSize(width: 640, height: 260)
+
     static func main() {
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -27,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Окно фиксировано по максимальному развороту и центрировано над вырезом.
-        let panelSize = CGSize(width: 640, height: 260)
+        let panelSize = Self.maxPanelSize
         let origin = CGPoint(
             x: screen.frame.midX - panelSize.width / 2,
             y: screen.frame.maxY - panelSize.height
