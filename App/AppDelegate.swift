@@ -96,10 +96,9 @@ private struct DebugNotchView: View {
         }
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var animation: Animation {
-        if case .closed = controller.state {
-            return .snappy(duration: 0.26)
-        }
-        return .spring(response: 0.34, dampingFraction: 0.68)
+        NotchMotion.animation(for: controller.state, reduceMotion: reduceMotion)
     }
 }
