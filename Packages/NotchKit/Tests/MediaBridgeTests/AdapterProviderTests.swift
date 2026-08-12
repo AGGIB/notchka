@@ -63,3 +63,20 @@ func unrecognisedLineKeepsState() {
     _ = accumulator.apply(.snapshot(base))
     #expect(accumulator.apply(.unrecognized("шум")) == base)
 }
+
+/// Заведомо несуществующие пути: `AdapterProcess.lines()` падает на
+/// `process.run()` мгновенно (ENOENT), реального процесса не возникает —
+/// тест ничего не запускает и не зависит от собранного адаптера.
+private let unreachablePaths = AdapterPaths(
+    perl: URL(fileURLWithPath: "/nonexistent/perl"),
+    script: URL(fileURLWithPath: "/nonexistent/script.pl"),
+    framework: URL(fileURLWithPath: "/nonexistent/Framework")
+)
+
+@Test("повторное обращение к snapshots не поднимает второй насос")
+func repeatedSnapshotsAccessDoesNotStartSecondPump() async {
+    let provider = AdapterProvider(paths: unreachablePaths)
+    _ = await provider.snapshots
+    _ = await provider.snapshots
+    #expect(await provider.pumpsStarted == 1)
+}

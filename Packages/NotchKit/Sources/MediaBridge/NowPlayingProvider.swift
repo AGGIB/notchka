@@ -7,6 +7,10 @@ import Foundation
 /// вторая реализация напишется на браузерном расширении, а UI не изменится.
 public protocol NowPlayingProvider: Sendable {
     /// nil в потоке значит «сейчас ничего не играет».
+    ///
+    /// Сколько потребителей одновременно поток обслуживает честно и не
+    /// теряя события — решает реализация; сверяйтесь с её документацией
+    /// (`AdapterProvider` рассчитан ровно на одного).
     var snapshots: AsyncStream<NowPlayingSnapshot?> { get async }
     func send(_ command: MediaCommand) async throws
 }
