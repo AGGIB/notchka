@@ -17,4 +17,10 @@ public enum NotchMotion {
     /// Нужно ли морфить форму. При Reduce Motion форма меняется мгновенно,
     /// а переход отдаётся прозрачности.
     public static func usesMorph(reduceMotion: Bool) -> Bool { !reduceMotion }
+
+    /// Смена акцентного цвета (обложка трека) — плавная перекраска тени,
+    /// не связанная с раскрытием панели, поэтому не участвует в переключении
+    /// opening/closing/reduced и не подчиняется Reduce Motion: это тихая
+    /// смена оттенка, а не движение, которое спека просит приглушать.
+    public static let accentFade = Animation.easeInOut(duration: 0.6)
 }

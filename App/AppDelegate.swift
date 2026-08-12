@@ -13,10 +13,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// подписку в deinit.
     private var screenParametersObserver: NSObjectProtocol?
 
-    /// Постоянный размер окна — максимум, которого панель достигает в `expanded`.
-    /// Именованная константа вместо литерала: то же значение понадобится
-    /// плану 2 при переходе на настоящее содержимое вкладок.
-    private static let maxPanelSize = CGSize(width: 640, height: 260)
     private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "AppDelegate")
 
     static func main() {
@@ -74,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Окно фиксировано по максимальному развороту и центрировано над вырезом.
-        let frame = panelFrame(for: screen, size: Self.maxPanelSize)
+        let frame = panelFrame(for: screen, size: PanelMetrics.windowSize)
 
         if let controller, let panel {
             // Чёлка та же, но экран сдвинулся или изменился: обновляем
@@ -96,11 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel: panel
         )
         panel.contentView = NSHostingView(
-            rootView: DebugNotchView(
-                controller: controller,
-                notchWidth: geometry.notchRect.width,
-                notchHeight: geometry.notchRect.height
-            )
+            rootView: NotchRootView(controller: controller, notchSize: geometry.notchRect.size)
         )
         controller.start()
         self.controller = controller
@@ -126,45 +118,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Отладочная вьюха: переводит состояние машины в геометрию силуэта,
-/// чтобы визуально проверить пороги и пружины до появления настоящего
-/// содержимого панели.
-private struct DebugNotchView: View {
+/// Мост между контроллером и оболочкой панели.
+///
+/// NotchPanelView лежит в NotchUI и принимает NotchState значением, а не
+/// сам контроллер, — иначе AppKit-независимый пакет пришлось бы завязывать
+/// на App-таргет. Поэтому controller.state читается именно здесь, внутри
+/// body: Observation подписывается на свойство только там, где оно было
+/// прочитано во время отрисовки, — вычисли это значение один раз в
+/// refreshNotchScreen() и передай константой, подписки бы не возникло, и
+/// панель навсегда застыла бы в состоянии на момент запуска.
+private struct NotchRootView: View {
     let controller: NotchController
-    let notchWidth: CGFloat
-    let notchHeight: CGFloat
+    let notchSize: CGSize
 
     var body: some View {
-        NotchShape(
-            width: currentWidth,
-            height: currentHeight,
-            bottomRadius: currentHeight > 60 ? 22 : 10,
-            concaveRadius: 8
-        )
-        .fill(.black)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(animation, value: controller.state)
-    }
-
-    private var currentWidth: CGFloat {
-        switch controller.state {
-        case .closed: notchWidth
-        case .peek: notchWidth + 120
-        case .expanded: 620
+        NotchPanelView(
+            state: controller.state,
+            notchSize: notchSize,
+            // Константа до Task 8: акцент из обложки (ArtworkAccent,
+            // готов с Task 6) подключается вместе с самим плеером.
+            accent: .white
+        ) { tab in
+            Text(String(describing: tab))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
         }
-    }
-
-    private var currentHeight: CGFloat {
-        switch controller.state {
-        case .closed: notchHeight
-        case .peek: notchHeight + 28
-        case .expanded: 200
-        }
-    }
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var animation: Animation {
-        NotchMotion.animation(for: controller.state, reduceMotion: reduceMotion)
     }
 }
