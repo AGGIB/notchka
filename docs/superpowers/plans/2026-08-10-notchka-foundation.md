@@ -65,28 +65,26 @@ find vendor/mediaremote-adapter -name '*.pl'
 
 - [ ] **Step 2: Собрать MediaRemoteAdapter.framework**
 
-Посмотри доступные схемы, затем собери релизную конфигурацию:
+Репозиторий собирается через **CMake** — Xcode-проекта и `Package.swift` в нём нет.
 
 ```bash
 cd vendor/mediaremote-adapter
-xcodebuild -list
-xcodebuild -scheme MediaRemoteAdapter -configuration Release -derivedDataPath .build build
-find .build -name 'MediaRemoteAdapter.framework' -maxdepth 6
+cmake -S . -B .build -DCMAKE_BUILD_TYPE=Release
+cmake --build .build
 cd -
+ls -d vendor/mediaremote-adapter/.build/MediaRemoteAdapter.framework
 ```
 
-Если схема называется иначе — возьми имя из вывода `xcodebuild -list`. Если в репозитории
-нет Xcode-проекта, а есть `Package.swift`, собирай через `swift build -c release` и ищи
-фреймворк в `.build/release`.
-
-Ожидается: путь вида `vendor/mediaremote-adapter/.build/Build/Products/Release/MediaRemoteAdapter.framework`.
-Запиши его в переменную для следующих шагов.
+Ожидается: `vendor/mediaremote-adapter/.build/MediaRemoteAdapter.framework`, около 5 МБ.
 
 - [ ] **Step 3: Проверить работоспособность адаптера**
 
+Пути обязаны быть **абсолютными**: с относительными адаптер падает с
+`Failed to load framework`. Это не придирка стиля, а требование самого бриджа.
+
 ```bash
-ADAPTER_PL=$(find vendor/mediaremote-adapter -name '*.pl' | head -1)
-ADAPTER_FRAMEWORK=$(find vendor/mediaremote-adapter -name 'MediaRemoteAdapter.framework' | head -1)
+ADAPTER_PL="$PWD/vendor/mediaremote-adapter/bin/mediaremote-adapter.pl"
+ADAPTER_FRAMEWORK="$PWD/vendor/mediaremote-adapter/.build/MediaRemoteAdapter.framework"
 /usr/bin/perl "$ADAPTER_PL" "$ADAPTER_FRAMEWORK" test; echo "exit=$?"
 ```
 
@@ -201,8 +199,8 @@ git commit -m "chore: вендоринг mediaremote-adapter и спайк чт�
 **Files:**
 - Create: `project.yml`
 - Create: `Packages/NotchKit/Package.swift`
-- Create: `Packages/NotchKit/Sources/NotchCore/NotchKitVersion.swift`
-- Create: `Packages/NotchKit/Tests/NotchCoreTests/SmokeTests.swift`
+- Create: `Packages/NotchKit/Sources/NotchCore/NotchCorePlaceholder.swift`
+- Create: `Packages/NotchKit/Sources/NotchUI/NotchUIPlaceholder.swift`
 - Create: `App/AppDelegate.swift`
 - Create: `App/Info.plist`
 - Modify: `.gitignore`
@@ -210,7 +208,12 @@ git commit -m "chore: вендоринг mediaremote-adapter и спайк чт�
 **Interfaces:**
 - Consumes: ничего
 - Produces: собираемый app-таргет `Notchka` и библиотеки `NotchCore`, `NotchUI`;
-  команды сборки и тестов, которыми пользуются все последующие задачи.
+  команды сборки, которыми пользуются все последующие задачи.
+
+Задача строительная: в ней нет тестов, потому что нечего проверять, кроме
+успешной сборки. Тест-таргеты объявляются там, где появляются настоящие тесты:
+`NotchCoreTests` в Task 3, `NotchUITests` в Task 6. Пустой тест-таргет SPM
+не соберёт, поэтому объявлять их заранее нельзя.
 
 - [ ] **Step 1: Установить XcodeGen**
 
@@ -240,57 +243,38 @@ let package = Package(
     targets: [
         .target(name: "NotchCore"),
         .target(name: "NotchUI", dependencies: ["NotchCore"]),
-        .testTarget(name: "NotchCoreTests", dependencies: ["NotchCore"]),
-        .testTarget(name: "NotchUITests", dependencies: ["NotchUI"]),
     ]
 )
 ```
 
-- [ ] **Step 3: Написать падающий смоук-тест**
+- [ ] **Step 3: Создать заглушки таргетов**
 
-Создай `Packages/NotchKit/Tests/NotchCoreTests/SmokeTests.swift`:
+SPM не собирает таргет без единого исходника, а настоящих типов тут ещё нет.
+Обе заглушки удаляются в задачах, которые приносят первый настоящий файл.
+
+Создай `Packages/NotchKit/Sources/NotchCore/NotchCorePlaceholder.swift`:
 
 ```swift
-import Testing
-@testable import NotchCore
-
-@Test("пакет собирается и версия доступна")
-func packageVersionIsAvailable() {
-    #expect(NotchKitVersion.current == "1")
-}
+/// Заглушка таргета. Удаляется в Task 3, когда появляется ScreenMetrics.
+enum NotchCorePlaceholder {}
 ```
 
-- [ ] **Step 4: Запустить тест и убедиться, что он падает**
-
-Run: `swift test --package-path Packages/NotchKit`
-Expected: FAIL — `cannot find 'NotchKitVersion' in scope`
-
-- [ ] **Step 5: Написать минимальную реализацию**
-
-Создай `Packages/NotchKit/Sources/NotchCore/NotchKitVersion.swift`:
+Создай `Packages/NotchKit/Sources/NotchUI/NotchUIPlaceholder.swift`:
 
 ```swift
-/// Маркер сборки пакета. Существует, чтобы смоук-тест имел что проверять,
-/// пока в NotchCore нет настоящих типов.
-public enum NotchKitVersion {
-    public static let current = "1"
-}
-```
-
-Создай пустой файл-заглушку, чтобы таргет `NotchUI` собирался:
-`Packages/NotchKit/Sources/NotchUI/NotchUIPlaceholder.swift`
-
-```swift
-/// Заглушка таргета. Удаляется в Task 8, когда появляется NotchShape.
+/// Заглушка таргета. Удаляется в Task 6, когда появляется NotchShape.
 enum NotchUIPlaceholder {}
 ```
 
-- [ ] **Step 6: Запустить тест и убедиться, что он проходит**
+- [ ] **Step 4: Убедиться, что пакет собирается**
 
-Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS, 1 тест
+Run: `swift build --package-path Packages/NotchKit`
+Expected: `Build complete`, ноль предупреждений
 
-- [ ] **Step 7: Описать app-таргет**
+Тестов в этой задаче нет и быть не может: проверять здесь нечего, кроме факта
+сборки. Первый настоящий красно-зелёный цикл начинается в Task 3.
+
+- [ ] **Step 5: Описать app-таргет**
 
 Создай `project.yml`:
 
@@ -336,7 +320,7 @@ targets:
         ENABLE_USER_SCRIPT_SANDBOXING: NO
 ```
 
-- [ ] **Step 8: Написать точку входа**
+- [ ] **Step 6: Написать точку входа**
 
 Создай `App/AppDelegate.swift`:
 
@@ -361,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 ```
 
-- [ ] **Step 9: Сгенерировать проект и собрать**
+- [ ] **Step 7: Сгенерировать проект и собрать**
 
 ```bash
 xcodegen generate
@@ -371,7 +355,7 @@ xcodebuild -project Notchka.xcodeproj -scheme Notchka -configuration Debug \
 
 Expected: `** BUILD SUCCEEDED **`
 
-- [ ] **Step 10: Проверить, что приложение запускается агентом**
+- [ ] **Step 8: Проверить, что приложение запускается агентом**
 
 ```bash
 open build/Build/Products/Debug/Notchka.app
@@ -385,7 +369,7 @@ Expected: процесс найден, иконка в Dock **не появил�
 pkill -x Notchka
 ```
 
-- [ ] **Step 11: Закоммитить**
+- [ ] **Step 9: Закоммитить**
 
 Добавь в `.gitignore`:
 
@@ -409,6 +393,8 @@ git commit -m "feat: скелет проекта — app-таргет Notchka и
 **Files:**
 - Create: `Packages/NotchKit/Sources/NotchCore/ScreenMetrics.swift`
 - Create: `Packages/NotchKit/Sources/NotchCore/NotchGeometry.swift`
+- Delete: `Packages/NotchKit/Sources/NotchCore/NotchCorePlaceholder.swift`
+- Modify: `Packages/NotchKit/Package.swift` — объявить тест-таргет
 - Test: `Packages/NotchKit/Tests/NotchCoreTests/NotchGeometryTests.swift`
 
 **Interfaces:**
@@ -419,7 +405,14 @@ git commit -m "feat: скелет проекта — app-таргет Notchka и
   - `NotchGeometryCalculator.geometry(for: ScreenMetrics) -> NotchGeometry?`
   - Константы `NotchGeometryCalculator.hotZoneInsetX = 6`, `.hotZoneInsetBottom = 4`
 
-- [ ] **Step 1: Написать падающие тесты**
+- [ ] **Step 1: Объявить тест-таргет и написать падающие тесты**
+
+Task 2 оставил `Package.swift` без тест-таргетов: пустой тест-таргет SPM не собирает.
+Добавь в массив `targets`:
+
+```swift
+        .testTarget(name: "NotchCoreTests", dependencies: ["NotchCore"]),
+```
 
 Создай `Packages/NotchKit/Tests/NotchCoreTests/NotchGeometryTests.swift`:
 
@@ -482,6 +475,9 @@ Run: `swift test --package-path Packages/NotchKit --filter NotchGeometryTests`
 Expected: FAIL — `cannot find 'ScreenMetrics' in scope`
 
 - [ ] **Step 3: Написать реализацию**
+
+Удали заглушку `Packages/NotchKit/Sources/NotchCore/NotchCorePlaceholder.swift` —
+в таргете появляются настоящие типы, держать её больше незачем.
 
 Создай `Packages/NotchKit/Sources/NotchCore/ScreenMetrics.swift`:
 
@@ -828,7 +824,12 @@ public struct NotchStateMachine: Sendable {
 - [ ] **Step 5: Запустить тесты и убедиться, что они проходят**
 
 Run: `swift test --package-path Packages/NotchKit --filter NotchStateMachineTests`
-Expected: PASS, 13 тестов
+Expected: PASS, 14 тестов
+
+Четырнадцатый тест добавлен после ревью: строка таблицы «peek + хоткей →
+expanded(последняя вкладка)» была реализована, но не покрыта. Он должен
+уводить `lastTab` на вкладку, отличную от `.music`, иначе не отличит
+правильное поведение от подстановки музыки по умолчанию.
 
 - [ ] **Step 6: Закоммитить**
 
@@ -855,7 +856,15 @@ git commit -m "feat: машина состояний панели с полно�
   - `HoverDebouncer.enterDwell = 0.120`, `.exitGrace = 0.250`
   - `mutating func cursorMoved(isInsideHotZone: Bool, at: Date) -> NotchEvent?`
   - `mutating func tick(at: Date) -> NotchEvent?`
-  - `var hasPendingTransition: Bool` — по нему Task 7 решает, нужен ли таймер
+  - `var hasPendingTransition: Bool` — по нему Task 8 решает, нужен ли таймер
+
+**Инвариант, на который опирается машина состояний.** События входа и выхода
+всегда парны: `.cursorLeftHotZone` испускается только после того, как был
+испущен `.cursorEnteredHotZone`. Машина из Task 4 обрабатывает выход курсора
+лишь из `peek(.hover)`; если бы дебаунсер мог выдать одиночный выход во время
+автопика по смене трека, событие молча провалилось бы в `default`. Поле
+`reported` и есть носитель этого инварианта — оно хранит то, о чём уже
+сообщили наружу, и переход обратно возможен только из сообщённого состояния.
 
 - [ ] **Step 1: Написать падающие тесты**
 
@@ -1004,7 +1013,14 @@ git commit -m "feat: пороги входа и выхода курсора из
 **Files:**
 - Create: `Packages/NotchKit/Sources/NotchUI/NotchShape.swift`
 - Delete: `Packages/NotchKit/Sources/NotchUI/NotchUIPlaceholder.swift`
+- Modify: `Packages/NotchKit/Package.swift` — объявить тест-таргет
 - Test: `Packages/NotchKit/Tests/NotchUITests/NotchShapeTests.swift`
+
+Перед тестами добавь в массив `targets` файла `Package.swift`:
+
+```swift
+        .testTarget(name: "NotchUITests", dependencies: ["NotchUI"]),
+```
 
 **Interfaces:**
 - Consumes: ничего
@@ -1434,6 +1450,11 @@ final class CursorMonitor {
         setTicking(false)
     }
 
+    deinit {
+        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit.
+        MainActor.assumeIsolated { stop() }
+    }
+
     private func emit() {
         onSample?(NSEvent.mouseLocation, Date())
     }
@@ -1508,7 +1529,18 @@ final class HotkeyCenter {
         )
 
         let id = EventHotKeyID(signature: Self.signature, id: Self.hotKeyID)
-        RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef)
+        let status = RegisterEventHotKey(
+            keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef
+        )
+        guard status == noErr else {
+            // Без этого лога отказ регистрации неотличим от хоткея, который
+            // просто никто не нажимает — единственный способ узнать причину
+            // у пользователя ежедневного инструмента это системный лог.
+            NSLog(
+                "Notchka: регистрация хоткея не удалась (keyCode=\(keyCode), modifiers=\(modifiers)), OSStatus=\(status). Вероятная причина: сочетание уже занято другим приложением или системой."
+            )
+            return
+        }
     }
 
     func unregister() {
@@ -1565,6 +1597,14 @@ final class NotchController {
         }
     }
 
+    deinit {
+        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit.
+        MainActor.assumeIsolated {
+            cursor.stop()
+            hotkey.unregister()
+        }
+    }
+
     func handle(_ event: NotchEvent) {
         guard machine.handle(event) != nil else { return }
         state = machine.state
@@ -1572,9 +1612,20 @@ final class NotchController {
     }
 
     private func cursorSampled(at location: CGPoint, now: Date) {
-        // NSEvent.mouseLocation отсчитывается снизу вверх, а геометрия чёлки — сверху.
-        let flipped = CGPoint(x: location.x, y: screenFrame.maxY - location.y)
-        let isInside = geometry.hotZone.contains(flipped)
+        // NSEvent.mouseLocation задан в глобальных координатах AppKit: начало
+        // отсчёта — левый нижний угол всей раскладки мониторов, Y растёт вверх;
+        // это начало не обязано совпадать с левым нижним углом именно этого
+        // экрана (при нескольких дисплеях у screenFrame бывает ненулевой origin).
+        // NotchGeometry.hotZone, наоборот, всегда задана относительно своего
+        // экрана с началом в левом верхнем углу. Поэтому X переводится сдвигом
+        // на screenFrame.origin.x — переворота нет, в обеих системах X растёт
+        // вправо, — а Y вычитанием из screenFrame.maxY: здесь сдвиг и переворот
+        // совпадают в одном действии, потому что maxY уже равен origin.y + height.
+        let screenRelative = CGPoint(
+            x: location.x - screenFrame.origin.x,
+            y: screenFrame.maxY - location.y
+        )
+        let isInside = geometry.hotZone.contains(screenRelative)
 
         if let event = debouncer.cursorMoved(isInsideHotZone: isInside, at: now) {
             handle(event)
@@ -1832,7 +1883,7 @@ git commit -m "feat: единые параметры движения и под�
 swift test --package-path Packages/NotchKit
 ```
 
-Expected: PASS, 31 тест (4 геометрия + 13 машина + 6 пороги + 5 форма + 3 движение)
+Expected: PASS, 32 теста (4 геометрия + 14 машина + 6 пороги + 5 форма + 3 движение)
 
 - [ ] **Step 2: Собрать релизную конфигурацию**
 
@@ -1874,6 +1925,41 @@ git commit -m "docs: приёмка фундамента Notchka"
 
 - **План 2 — Музыка.** `MediaBridge` поверх путей и команд из спайка Task 1,
   вкладка плеера, извлечение акцентного цвета из обложки.
+  Там же подключается `NotchMotion.usesMorph(reduceMotion:)`: функция написана
+  и покрыта тестами в Task 9, но потребителя пока не имеет. Требование спеки
+  «морф заменяется кросс-фейдом» сейчас выполнено наполовину — переключается
+  только темп анимации, форма продолжает перетекать. На отладочной заливке
+  разница незаметна, с настоящим содержимым вкладки станет заметной.
+  Решение оставить функцию до появления потребителя принято человеком.
+
+  Ещё два долга фундамента, которые план 2 обязан закрыть до того, как подключит клик:
+
+  **Отправитель `fullScreenChanged`.** Машина состояний обрабатывает это событие
+  с Task 4, тесты его покрывают, но посылать его некому — это единственное событие
+  без отправителя. Спека §5 требует отключать панель в фуллскрине; чек-лист Task 7
+  в этом плане ослабил требование до «не мешает и не мигает», и человек честно
+  подтвердил именно слабую формулировку. Дефект плана, не исполнения. Сегодня
+  последствие ограничено: закрытая панель прозрачна для мыши, поэтому фуллскрин
+  не ломается, но наведение на область выреза в полноэкранном приложении откроет
+  peek поверх его содержимого. Дешёвый способ обнаружения — схлопывание
+  `safeAreaInsets.top` в ноль при смене пространства.
+
+  **Неверная ссылка в отчёте приёмки.** `2026-08-10-foundation-acceptance.md`
+  цитирует `task-3-report.md:75` с арифметической ошибкой в списке изменённых
+  файлов. Ошибки там нет: строка 77 того файла считает верно, а строка 75 —
+  вообще про другое. Формулировка тянется из журнала прогона и была неточной
+  ещё до финальной волны правок. Припаркована сознательно: цитируемый файл
+  лежит под `.gitignore` и в слитую ветку не попадает, так что в истории
+  остаётся только неверная цитата, а не описанный ею дефект. Чинится одной
+  строкой при первом же касании отчёта.
+
+  **Удержание открытой панели по её собственным границам.** Правило зафиксировано
+  в спеке §8 решением человека. Сейчас горячая зона (вырез + 6 pt) заметно меньше
+  peek-панели (вырез + 120 pt), то есть 54 pt видимой панели недостижимы мышью:
+  подведя курсор, пользователь выходит из зоны и панель закрывается под ним.
+  Не проявляется только потому, что событие клика ещё никто не отправляет —
+  ровно поэтому десять пореверенных задач этого не увидели. Станет блокером
+  в тот момент, когда план 2 подключит строку `peek | клик | expanded(музыка)`.
 - **План 3 — Хранилище и буфер.** `NotchStore` на GRDB с FTS5, `ClipboardKit`
   с фильтрами приватности, горизонтальная лента, автовставка через CGEvent.
   Там же клавиатура из спеки §9: `⌘1`…`⌘4`, `⇥`, `Esc`, стрелки и `↩` подключаются
