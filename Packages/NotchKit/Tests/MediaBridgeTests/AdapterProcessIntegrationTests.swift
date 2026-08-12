@@ -16,21 +16,32 @@ private var repoRoot: URL {
         .deletingLastPathComponent()  // Packages -> корень репозитория
 }
 
+/// Общие пути для тестов файла — вынесены, чтобы условие трейта
+/// `.enabled(if:)` и тело теста не расходились в том, что считают путём.
+private var adapterPaths: AdapterPaths {
+    AdapterPaths.vendored(repoRoot: repoRoot)
+}
+
 @Test("пути к вендоренному адаптеру абсолютны")
 func vendoredPathsAreAbsolute() {
-    let paths = AdapterPaths.vendored(repoRoot: repoRoot)
+    let paths = adapterPaths
     #expect(paths.script.path.hasPrefix("/"))
     #expect(paths.framework.path.hasPrefix("/"))
     #expect(paths.perl.path == "/usr/bin/perl")
 }
 
-/// Требует собранного фреймворка. Пропускается, если его нет: собирать
-/// адаптер ради теста незачем, а на машине разработчика он уже есть.
-@Test("поток адаптера отдаёт хотя бы одну разобранную строку")
+/// Требует собранного фреймворка. Пропускается через трейт `.enabled(if:)`,
+/// а не через провал `#require`: условие трейта вычисляется ДО тела теста,
+/// и Swift Testing честно помечает тест как skipped, а не failed. Провал
+/// `#require` внутри тела — это всегда упавший тест, а не пропущенный, как
+/// показал первый прогон этого файла (не собран адаптер → красный тест
+/// с текстом «пропущен» в сообщении об ошибке, что вводит в заблуждение).
+@Test(
+    "поток адаптера отдаёт хотя бы одну разобранную строку",
+    .enabled(if: adapterPaths.existsOnDisk, "адаптер не собран, тест пропущен")
+)
 func streamYieldsParsedLine() async throws {
-    let paths = AdapterPaths.vendored(repoRoot: repoRoot)
-    try #require(paths.existsOnDisk, "адаптер не собран, тест пропущен")
-
+    let paths = adapterPaths
     let adapter = AdapterProcess(paths: paths)
     var received: AdapterLine?
     for await line in await adapter.lines() {

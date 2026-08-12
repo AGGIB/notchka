@@ -73,14 +73,35 @@ public actor AdapterProcess {
 
     /// Разовая команда управления. Отдельный короткоживущий процесс —
     /// у `stream` нет входного канала для команд.
+    ///
+    /// Ждём завершения через `terminationHandler`, а не `process.waitUntilExit()`:
+    /// последний блокирует поток целиком, а это поток исполнителя актора —
+    /// пока `send` не завершится, актор не сможет обслужить ничего другого,
+    /// включая `stop()`. Если в этот момент супервизор из Task 5 гасит поток
+    /// (выход из приложения, перезапуск), `stop()` встанет в очередь актора
+    /// за уже идущим `send` и потеряет тот самый суб-секундный бюджет на
+    /// SIGINT, ради которого адаптер вообще его перехватывает. `await` на
+    /// continuation — точка приостановки, а не блокировки: актор в это время
+    /// свободен обслуживать другие вызовы.
     public func send(code: Int32) async throws {
         let process = Process()
         process.executableURL = paths.perl
         process.arguments = [paths.script.path, paths.framework.path, "send", String(code)]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            // Резолвится ровно один раз: либо отсюда после завершения
+            // процесса, либо из catch ниже, если он не смог даже
+            // запуститься — тогда terminationHandler системой не вызывается,
+            // двойного resume не будет.
+            process.terminationHandler = { _ in continuation.resume() }
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
     }
 
     /// Останавливает поток. SIGINT, а не SIGKILL: спайк подтвердил, что
