@@ -331,7 +331,7 @@ private struct NotchRootView: View {
                 position: musicModel.position,
                 artwork: musicModel.artwork,
                 accent: musicModel.accent
-            ) { musicModel.handle($0) }
+            ) { musicModel.togglePlayback() }
         default:
             Text(String(describing: tab))
                 .font(.system(size: 12, weight: .medium))

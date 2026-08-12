@@ -38,27 +38,25 @@ public struct TrackDisplay: Equatable, Sendable {
     }
 }
 
-public enum TrackControl: Sendable { case previous, playPause, next }
-
 public struct MusicTabView: View {
     private let track: TrackDisplay?
     private let position: TimeInterval
     private let artwork: Image?
     private let accent: Color
-    private let onControl: (TrackControl) -> Void
+    private let onTogglePlayback: () -> Void
 
     public init(
         track: TrackDisplay?,
         position: TimeInterval,
         artwork: Image?,
         accent: Color,
-        onControl: @escaping (TrackControl) -> Void
+        onTogglePlayback: @escaping () -> Void
     ) {
         self.track = track
         self.position = position
         self.artwork = artwork
         self.accent = accent
-        self.onControl = onControl
+        self.onTogglePlayback = onTogglePlayback
     }
 
     public var body: some View {
@@ -98,11 +96,7 @@ public struct MusicTabView: View {
                 EqualizerView(isAnimating: track.isPlaying, accent: accent)
             }
 
-            HStack(spacing: 16) {
-                control("backward.fill", .previous)
-                control(track.isPlaying ? "pause.fill" : "play.fill", .playPause)
-                control("forward.fill", .next)
-            }
+            playPauseButton(isPlaying: track.isPlaying)
 
             ProgressBar(
                 progress: TrackFormatting.progress(position: position, duration: track.duration),
@@ -133,9 +127,20 @@ public struct MusicTabView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    private func control(_ symbol: String, _ command: TrackControl) -> some View {
-        Button { onControl(command) } label: {
-            Image(systemName: symbol).font(.system(size: 13))
+    /// Play/pause — единственный элемент управления воспроизведением.
+    ///
+    /// Кнопок «предыдущий»/«следующий» трек здесь больше нет — не скрыты,
+    /// не задизейблены, убраны совсем. Они рисовали backward.fill/
+    /// forward.fill, но обе слали тот же toggle-код, что и эта кнопка:
+    /// переключение треков спайком не проверялось эмпирически, точных кодов
+    /// нет. Задизейбленная кнопка не лучше — она всё равно обещает своим
+    /// видом «пролистывание треков», которого на самом деле нет, а нажатие
+    /// на toggle во время воспроизведения по факту ОСТАНАВЛИВАЕТ музыку:
+    /// путать этим пользователя на ежедневном инструменте хуже, чем
+    /// временно недосчитаться двух кнопок.
+    private func playPauseButton(isPlaying: Bool) -> some View {
+        Button(action: onTogglePlayback) {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill").font(.system(size: 13))
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white.opacity(0.85))

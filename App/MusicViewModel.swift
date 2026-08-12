@@ -82,16 +82,17 @@ final class MusicViewModel {
         position = PlaybackPosition.current(in: snapshot, at: now)
     }
 
-    func handle(_ control: TrackControl) {
-        let command: MediaCommand = switch control {
-        case .playPause: .toggle
-        // Переключение треков спайком не проверялось: у адаптера есть коды
-        // play/pause/toggle, но код «следующий трек» не подтверждён. До
-        // проверки обе стрелки делают то же, что центральная кнопка — врать
-        // видом кнопки хуже, чем временно продублировать её поведение.
-        case .previous, .next: .toggle
-        }
-        Task { try? await provider.send(command) }
+    /// Разворачивает/приостанавливает воспроизведение — единственная
+    /// команда, которой сейчас управляет UI.
+    ///
+    /// Раньше здесь принимался TrackControl (previous/playPause/next):
+    /// обе стрелки перемотки слали тот же код toggle, что и play/pause,
+    /// потому что спайк коды переключения треков эмпирически не проверял.
+    /// Кнопки перемотки убраны из MusicTabView (см. doc у playPauseButton
+    /// там) вместе с типом TrackControl — раз других команд не осталось,
+    /// в enum и switch по нему тоже нет нужды.
+    func togglePlayback() {
+        Task { try? await provider.send(.toggle) }
     }
 
     private func apply(_ snapshot: NowPlayingSnapshot?) {
