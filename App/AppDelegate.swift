@@ -23,9 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let screen = ScreenMetricsReader.builtInScreen(),
-              let geometry = NotchGeometryCalculator.geometry(
-                  for: ScreenMetricsReader.metrics(for: screen)
-              )
+              let metrics = ScreenMetricsReader.metrics(for: screen),
+              let geometry = NotchGeometryCalculator.geometry(for: metrics)
         else {
             NSLog("Notchka: дисплей с чёлкой не найден, панель не создана")
             return

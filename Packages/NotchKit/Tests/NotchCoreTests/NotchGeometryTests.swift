@@ -48,3 +48,31 @@ func inconsistentAuxiliaryAreasAreRejected() {
     )
     #expect(NotchGeometryCalculator.geometry(for: broken) == nil)
 }
+
+@Test("нулевые боковые области при заявленной чёлке не дают вырез во весь экран")
+func zeroAuxiliaryAreasAreRejectedDespiteNotch() {
+    // Воспроизводит то, что раньше отдавал ScreenMetricsReader при nil с обеих
+    // сторон: safeAreaTopInset > 0 (чёлка есть), но боковые области нулевые.
+    // notchWidth тогда честно вычислился бы как frame.width — калькулятор
+    // обязан отказать здесь сам, не полагаясь на то, что вызывающая сторона
+    // никогда не передаст такие метрики.
+    let degenerate = ScreenMetrics(
+        frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        safeAreaTopInset: 32,
+        auxiliaryTopLeftWidth: 0,
+        auxiliaryTopRightWidth: 0
+    )
+    #expect(NotchGeometryCalculator.geometry(for: degenerate) == nil)
+}
+
+@Test("одна нулевая боковая область при заявленной чёлке тоже отклоняется")
+func singleZeroAuxiliaryAreaIsRejected() {
+    // Ассиметричный вариант той же деградации: только один nil у AppKit.
+    let halfDegenerate = ScreenMetrics(
+        frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        safeAreaTopInset: 32,
+        auxiliaryTopLeftWidth: 0,
+        auxiliaryTopRightWidth: 630
+    )
+    #expect(NotchGeometryCalculator.geometry(for: halfDegenerate) == nil)
+}

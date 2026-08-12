@@ -4,12 +4,24 @@ import NotchCore
 /// Единственное место, где AppKit превращается в чистые метрики.
 /// Всё остальное приложение работает уже со ScreenMetrics.
 enum ScreenMetricsReader {
-    static func metrics(for screen: NSScreen) -> ScreenMetrics {
-        ScreenMetrics(
+    /// Возвращает nil, если у экрана есть чёлка (`safeAreaInsets.top > 0`),
+    /// но хотя бы одна боковая область не измерена. `?? 0` в такой ситуации
+    /// превратил бы неизвестность в правдоподобную ложь — вырез шириной
+    /// почти во весь экран, — а не в честный отказ. NSScreen документированно
+    /// отдаёт эти свойства nil на части конфигураций; экран без чёлки этому
+    /// не подвержен, там nil ожидаем и безвреден, поэтому проверка условная.
+    static func metrics(for screen: NSScreen) -> ScreenMetrics? {
+        let topInset = screen.safeAreaInsets.top
+        let leftWidth = screen.auxiliaryTopLeftArea?.width
+        let rightWidth = screen.auxiliaryTopRightArea?.width
+        guard topInset <= 0 || (leftWidth != nil && rightWidth != nil) else {
+            return nil
+        }
+        return ScreenMetrics(
             frame: screen.frame,
-            safeAreaTopInset: screen.safeAreaInsets.top,
-            auxiliaryTopLeftWidth: screen.auxiliaryTopLeftArea?.width ?? 0,
-            auxiliaryTopRightWidth: screen.auxiliaryTopRightArea?.width ?? 0
+            safeAreaTopInset: topInset,
+            auxiliaryTopLeftWidth: leftWidth ?? 0,
+            auxiliaryTopRightWidth: rightWidth ?? 0
         )
     }
 

@@ -24,6 +24,16 @@ public enum NotchGeometryCalculator {
         // прямоугольник нулевой высоты.
         guard metrics.safeAreaTopInset > 0 else { return nil }
 
+        // Обе боковые области обязаны быть измерены и положительны: вырез по
+        // конструкции экрана всегда отделён от каждого края полосой меню-бара,
+        // нулевая ширина с любой стороны на экране с чёлкой не бывает настоящей.
+        // Это тот же случай, что ловит ScreenMetricsReader на границе с AppKit
+        // (nil-боковая область), но калькулятор не обязан доверять вызывающей
+        // стороне — он публичный API и может получить такие метрики и напрямую.
+        guard metrics.auxiliaryTopLeftWidth > 0, metrics.auxiliaryTopRightWidth > 0 else {
+            return nil
+        }
+
         let notchWidth = metrics.frame.width
             - metrics.auxiliaryTopLeftWidth
             - metrics.auxiliaryTopRightWidth
