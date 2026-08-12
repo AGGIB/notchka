@@ -41,11 +41,15 @@ func bodyIsVerticalBelowEars() {
 
 @Test("анимируемые данные переносят размеры туда и обратно")
 func animatableDataRoundTrips() {
-    var shape = NotchShape(width: 100, height: 50, bottomRadius: 8, concaveRadius: 6)
+    // concaveRadius задан разным на входе (4) и на выходе (10) — иначе
+    // тест не отличил бы «поле включено в animatableData» от «поле в
+    // AnimatablePair отсутствует, а значение просто не менялось».
+    var shape = NotchShape(width: 100, height: 50, bottomRadius: 8, concaveRadius: 4)
     shape.animatableData = NotchShape(
-        width: 300, height: 150, bottomRadius: 22, concaveRadius: 6
+        width: 300, height: 150, bottomRadius: 22, concaveRadius: 10
     ).animatableData
     #expect(shape.width == 300)
     #expect(shape.height == 150)
     #expect(shape.bottomRadius == 22)
+    #expect(shape.concaveRadius == 10)
 }

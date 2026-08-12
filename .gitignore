@@ -12,7 +12,9 @@ xcuserdata/
 # Swift Package Manager
 .build/
 .swiftpm/
-Package.resolved
+# Package.resolved НЕ игнорируется: это приложение, не библиотека — сборка
+# обязана быть воспроизводимой, как только появится первая внешняя
+# зависимость (GRDB.swift, KeyboardShortcuts, swift-snapshot-testing).
 
 # Brainstorming companion (локальные мокапы сессии)
 .superpowers/

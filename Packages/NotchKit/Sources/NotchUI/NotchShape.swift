@@ -18,12 +18,19 @@ public struct NotchShape: Shape {
         self.concaveRadius = concaveRadius
     }
 
-    public var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
-        get { AnimatablePair(AnimatablePair(width, height), bottomRadius) }
+    /// concaveRadius сегодня константа во всех вызывающих местах, поэтому
+    /// его отсутствие здесь было незаметно молчаливым скачком; следующий
+    /// план обоснованно предположит, что публичный var анимируется, как
+    /// остальные три поля, — поэтому он тоже часть animatableData.
+    public var animatableData: AnimatablePair<AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat>, CGFloat> {
+        get {
+            AnimatablePair(AnimatablePair(AnimatablePair(width, height), bottomRadius), concaveRadius)
+        }
         set {
-            width = newValue.first.first
-            height = newValue.first.second
-            bottomRadius = newValue.second
+            width = newValue.first.first.first
+            height = newValue.first.first.second
+            bottomRadius = newValue.first.second
+            concaveRadius = newValue.second
         }
     }
 
