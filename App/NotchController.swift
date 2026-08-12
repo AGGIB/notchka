@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import NotchCore
+import NotchUI
 
 /// Сводит воедино источники событий и машину состояний.
 /// Здесь же живёт правило: окно ловит мышь, пока панель не в `closed` —
@@ -82,7 +83,20 @@ final class NotchController {
             x: location.x - screenFrame.origin.x,
             y: screenFrame.maxY - location.y
         )
-        let isInside = geometry.hotZone.contains(screenRelative)
+
+        // Пока панель закрыта, вход проверяется по узкой зоне выреза — она
+        // мала намеренно, чтобы курсор, просто скользящий к меню-бару, её не
+        // раскрывал. Но эта же зона меньше открытой панели (см. спеку §8),
+        // и как только панель открыта (peek или expanded), проверка должна
+        // идти по её текущим видимым границам — иначе наведение на саму
+        // панель означало бы выход из зоны входа и закрытие под курсором.
+        let containmentZone: CGRect = switch state {
+        case .closed:
+            geometry.hotZone
+        case .peek, .expanded:
+            geometry.retentionZone(for: PanelMetrics.size(for: state, notch: geometry.notchRect.size))
+        }
+        let isInside = containmentZone.contains(screenRelative)
 
         if let event = debouncer.cursorMoved(isInsideHotZone: isInside, at: now) {
             handle(event)

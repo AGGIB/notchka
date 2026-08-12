@@ -4,6 +4,7 @@ import NotchCore
 import NotchUI
 import MediaBridge
 import Dispatch
+import CoreGraphics
 import os
 
 @MainActor
@@ -14,6 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Токен подписки на смену конфигурации экранов — хранится, чтобы снять
     /// подписку в deinit.
     private var screenParametersObserver: NSObjectProtocol?
+    /// Токен подписки на смену активного Space — тем же путём, что и
+    /// screenParametersObserver, снимается в deinit. Долг фундамента:
+    /// машина состояний обрабатывает .fullScreenChanged с плана 1, но до
+    /// этой подписки отправлять его было некому (см. handleActiveSpaceChange).
+    private var activeSpaceObserver: NSObjectProtocol?
     /// Источник сигнала SIGTERM — хранится, иначе GCD освободит его сразу
     /// после resume() и обработчик никогда не сработает.
     private var terminationSource: (any DispatchSourceSignal)?
@@ -72,6 +78,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.refreshNotchScreen()
             }
         }
+
+        // activeSpaceDidChangeNotification — единственный публичный сигнал о
+        // смене активного Space, и он же срабатывает, когда какое-то
+        // приложение (не обязательно наше — API не различает, чьё именно)
+        // входит или выходит из фуллскрина: на macOS фуллскрин всегда живёт
+        // в отдельном Space. Сама по себе смена Space ничего не говорит про
+        // фуллскрин — переключение между двумя обычными рабочими столами
+        // шлёт то же уведомление, — поэтому решение принимается по факту,
+        // проверкой в handleActiveSpaceChange().
+        activeSpaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleActiveSpaceChange()
+            }
+        }
     }
 
     deinit {
@@ -79,6 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             if let screenParametersObserver {
                 NotificationCenter.default.removeObserver(screenParametersObserver)
+            }
+            if let activeSpaceObserver {
+                NSWorkspace.shared.notificationCenter.removeObserver(activeSpaceObserver)
             }
         }
     }
@@ -169,6 +196,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         panel.orderFrontRegardless()
         self.panel = panel
+    }
+
+    /// Реакция на смену активного Space: пересчитывает признак фуллскрина и
+    /// шлёт его в машину состояний. Спека §5 требует отключать панель в
+    /// фуллскрине — на чёлочном дисплее там нет ни меню-бара, ни видимого
+    /// выреза, панели негде жить.
+    ///
+    /// Признак дешёвый и косвенный: safeAreaInsets.top встроенного экрана
+    /// равен высоте зоны меню-бара и схлопывается в 0, когда меню-бар
+    /// скрыт, — а меню-бар скрыт ровно тогда, когда активный Space
+    /// принадлежит фуллскрин-приложению. Прямого API «фуллскрин ли сейчас
+    /// чужой процесс» в AppKit нет.
+    private func handleActiveSpaceChange() {
+        guard let screen = Self.hardwareBuiltInScreen() else { return }
+        let topInset = screen.safeAreaInsets.top
+        let isFullScreen = topInset <= 0
+        Self.logger.debug(
+            "Смена активного Space: safeAreaInsets.top=\(topInset, privacy: .public) → isFullScreen=\(isFullScreen, privacy: .public)"
+        )
+        controller?.handle(.fullScreenChanged(isFullScreen))
+    }
+
+    /// Встроенный дисплей, найденный по аппаратному признаку
+    /// (CGDisplayIsBuiltin), а не по наличию выреза.
+    ///
+    /// ScreenMetricsReader.builtInScreen() ищет экран с safeAreaInsets.top > 0
+    /// — это правильно для его задачи (нет выреза — не с чем считать
+    /// геометрию), но здесь этот же inset и есть искомый сигнал: в фуллскрине
+    /// он временно схлопывается в 0, и фильтр ScreenMetricsReader в этот
+    /// момент перестал бы находить именно тот экран, за которым мы следим.
+    private static func hardwareBuiltInScreen() -> NSScreen? {
+        NSScreen.screens.first { screen in
+            guard let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+            else { return false }
+            return CGDisplayIsBuiltin(screenNumber) != 0
+        }
     }
 
     private func panelFrame(for screen: NSScreen, size: CGSize) -> CGRect {
