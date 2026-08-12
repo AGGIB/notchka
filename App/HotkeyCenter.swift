@@ -31,7 +31,7 @@ final class HotkeyCenter {
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
         )
-        InstallEventHandler(
+        let installStatus = InstallEventHandler(
             GetApplicationEventTarget(),
             { _, event, userData in
                 guard let userData, let event else { return noErr }
@@ -61,21 +61,32 @@ final class HotkeyCenter {
             Unmanaged.passUnretained(self).toOpaque(),
             &eventHandler
         )
+        guard installStatus == noErr else {
+            // Без лога отказ установки обработчика неотличим от исправно
+            // зарегистрированного, но никогда не срабатывающего хоткея:
+            // RegisterEventHotKey ниже всё равно «успешно» отработает.
+            Self.logFailure("Установка обработчика хоткея", status: installStatus, keyCode: keyCode, modifiers: modifiers)
+            return
+        }
 
         let id = EventHotKeyID(signature: Self.signature, id: Self.hotKeyID)
         let status = RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef)
         guard status == noErr else {
-            // Без этого лога отказ регистрации неотличим от хоткея, который
-            // просто никто не нажимает — единственный способ узнать причину
-            // у пользователя ежедневного инструмента это системный лог.
-            // Значения помечены .public: это диагностика для Console.app,
-            // а не приватные данные пользователя — молча скрытые редакцией
-            // по умолчанию значения свели бы лог обратно к бесполезному.
-            Self.logger.error(
-                "Регистрация хоткея не удалась (keyCode=\(keyCode, privacy: .public), modifiers=\(modifiers, privacy: .public)), OSStatus=\(status, privacy: .public). Вероятная причина: сочетание уже занято другим приложением или системой."
-            )
+            Self.logFailure("Регистрация хоткея", status: status, keyCode: keyCode, modifiers: modifiers)
             return
         }
+    }
+
+    /// Без этого лога отказ установки обработчика или регистрации хоткея
+    /// неотличим от хоткея, который просто никто не нажимает — единственный
+    /// способ узнать причину у пользователя ежедневного инструмента это
+    /// системный лог. Значения помечены .public: это диагностика для
+    /// Console.app, а не приватные данные пользователя — молча скрытые
+    /// редакцией по умолчанию значения свели бы лог обратно к бесполезному.
+    private static func logFailure(_ step: String, status: OSStatus, keyCode: UInt32, modifiers: UInt32) {
+        logger.error(
+            "\(step, privacy: .public) не удалась (keyCode=\(keyCode, privacy: .public), modifiers=\(modifiers, privacy: .public)), OSStatus=\(status, privacy: .public). Вероятная причина: сочетание уже занято другим приложением или системой."
+        )
     }
 
     func unregister() {

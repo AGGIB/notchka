@@ -27,6 +27,14 @@ final class NotchController {
     }
 
     func start() {
+        // Единственный источник истины про «closed ⇒ мышь прозрачна»:
+        // раньше это держалось только на том, что NotchPanel.init и
+        // syncMouseHandling() независимо друг от друга ставят одно и то же
+        // значение по умолчанию. Актуально и после re-derivation геометрии
+        // (см. AppDelegate.refreshNotchScreen) — при пересоздании панели
+        // start() вызывается заново, а при обновлении геометрии на месте
+        // state не меняется, так что синхронизировать нечего.
+        syncMouseHandling()
         cursor.start { [weak self] location, now in
             self?.cursorSampled(at: location, now: now)
         }

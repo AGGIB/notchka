@@ -28,11 +28,17 @@ final class CursorMonitor {
     func setTicking(_ isTicking: Bool) {
         guard isTicking != (timer != nil) else { return }
         if isTicking {
-            timer = Timer.scheduledTimer(
-                withTimeInterval: Self.tickInterval, repeats: true
-            ) { [weak self] _ in
+            // Timer.scheduledTimer регистрирует таймер только в режиме .default —
+            // приложение живёт рядом с меню-баром, а там таймер в этом режиме не
+            // тикает во время отслеживания открытого меню (RunLoop.Mode.eventTracking).
+            // Замёрзший на это время курсор никогда не досчитал бы порог наведения.
+            // .common объединяет оба режима, поэтому таймер создаётся вручную и
+            // добавляется в текущий run loop, а не через scheduledTimer.
+            let timer = Timer(timeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.emit() }
             }
+            RunLoop.current.add(timer, forMode: .common)
+            self.timer = timer
         } else {
             timer?.invalidate()
             timer = nil
