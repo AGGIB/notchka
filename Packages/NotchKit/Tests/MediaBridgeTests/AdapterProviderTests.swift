@@ -9,6 +9,20 @@ private let base = NowPlayingSnapshot(
     artworkData: nil, artworkMimeType: nil
 )
 
+/// Тот же трек, но на паузе — нужен отдельным значением для тестов на
+/// перепривязку метки времени ниже: без перехода isPlaying false→true
+/// перепривязка не должна срабатывать вовсе.
+private let pausedBase = NowPlayingSnapshot(
+    title: "Sweet Dreams", artist: "Eurythmics", album: "", duration: 216,
+    elapsedTime: 10, timestamp: Date(timeIntervalSince1970: 1_000_000),
+    playbackRate: 1, isPlaying: false, sourceBundleID: "com.google.Chrome",
+    artworkData: nil, artworkMimeType: nil
+)
+
+/// Опорное «сейчас» для вызовов apply(_:now:), где сам момент времени не
+/// является предметом теста.
+private let now = Date(timeIntervalSince1970: 2_000_000)
+
 @Test("коды команд совпадают с проверенными спайком")
 func commandCodesMatchSpike() {
     #expect(MediaCommand.play.adapterCode == 0)
@@ -19,16 +33,16 @@ func commandCodesMatchSpike() {
 @Test("снимок заменяет состояние целиком")
 func snapshotReplacesState() {
     var accumulator = SnapshotAccumulator()
-    #expect(accumulator.apply(.snapshot(base)) == base)
+    #expect(accumulator.apply(.snapshot(base), now: now) == base)
 }
 
 @Test("дифф правит только заданные поля")
 func diffPatchesState() {
     var accumulator = SnapshotAccumulator()
-    _ = accumulator.apply(.snapshot(base))
+    _ = accumulator.apply(.snapshot(base), now: now)
     var payload = NowPlayingPayload()
     payload.playing = false
-    let updated = accumulator.apply(.diff(payload))
+    let updated = accumulator.apply(.diff(payload), now: now)
     #expect(updated?.isPlaying == false)
     #expect(updated?.title == "Sweet Dreams")
 }
@@ -38,30 +52,66 @@ func accumulatorDiffBeforeSnapshotIsIgnored() {
     var accumulator = SnapshotAccumulator()
     var payload = NowPlayingPayload()
     payload.playing = true
-    #expect(accumulator.apply(.diff(payload)) == nil)
+    #expect(accumulator.apply(.diff(payload), now: now) == nil)
 }
 
 @Test("пустой снимок означает конец сессии")
 func emptySnapshotClearsState() {
     var accumulator = SnapshotAccumulator()
-    _ = accumulator.apply(.snapshot(base))
-    #expect(accumulator.apply(.snapshot(nil)) == nil)
+    _ = accumulator.apply(.snapshot(base), now: now)
+    #expect(accumulator.apply(.snapshot(nil), now: now) == nil)
     #expect(accumulator.current == nil)
 }
 
 @Test("временная осечка не стирает последний известный трек")
 func transientFailureKeepsState() {
     var accumulator = SnapshotAccumulator()
-    _ = accumulator.apply(.snapshot(base))
-    #expect(accumulator.apply(.transientFailure("timed out")) == base)
+    _ = accumulator.apply(.snapshot(base), now: now)
+    #expect(accumulator.apply(.transientFailure("timed out"), now: now) == base)
     #expect(accumulator.current == base)
 }
 
 @Test("неопознанная строка не меняет состояние")
 func unrecognisedLineKeepsState() {
     var accumulator = SnapshotAccumulator()
-    _ = accumulator.apply(.snapshot(base))
-    #expect(accumulator.apply(.unrecognized("шум")) == base)
+    _ = accumulator.apply(.snapshot(base), now: now)
+    #expect(accumulator.apply(.unrecognized("шум"), now: now) == base)
+}
+
+@Test("дифф playing:true без timestamp после паузы перепривязывает метку к now")
+func diffTurningPlayingOnWithoutTimestampReanchorsTimestamp() {
+    var accumulator = SnapshotAccumulator()
+    _ = accumulator.apply(.snapshot(pausedBase), now: now)
+    var payload = NowPlayingPayload()
+    payload.playing = true
+    // Трек стоял на паузе 10 минут — старая timestamp сделала бы drift
+    // в PlaybackPosition равным всей паузе целиком (см. описание правки).
+    let resumedAt = now.addingTimeInterval(600)
+    let updated = accumulator.apply(.diff(payload), now: resumedAt)
+    #expect(updated?.isPlaying == true)
+    #expect(updated?.timestamp == resumedAt)
+}
+
+@Test("дифф playing:true со своим timestamp не перепривязывается к now")
+func diffTurningPlayingOnWithTimestampKeepsAdapterValue() {
+    var accumulator = SnapshotAccumulator()
+    _ = accumulator.apply(.snapshot(pausedBase), now: now)
+    var payload = NowPlayingPayload()
+    payload.playing = true
+    let adapterTimestamp = Date(timeIntervalSince1970: 1_999_999)
+    payload.timestamp = adapterTimestamp
+    let updated = accumulator.apply(.diff(payload), now: now.addingTimeInterval(600))
+    #expect(updated?.timestamp == adapterTimestamp)
+}
+
+@Test("дифф playing:true без флипа (уже играл) не перепривязывает метку")
+func diffKeepingPlayingTrueWithoutTimestampDoesNotReanchor() {
+    var accumulator = SnapshotAccumulator()
+    _ = accumulator.apply(.snapshot(base), now: now)  // base.isPlaying уже true
+    var payload = NowPlayingPayload()
+    payload.playing = true
+    let updated = accumulator.apply(.diff(payload), now: now.addingTimeInterval(600))
+    #expect(updated?.timestamp == base.timestamp)
 }
 
 /// Заведомо несуществующие пути: `AdapterProcess.lines()` падает на

@@ -110,7 +110,7 @@ public actor AdapterProvider: NowPlayingProvider {
 
             for await line in await adapter.lines() {
                 sawAnything = true
-                continuation.yield(accumulator.apply(line))
+                continuation.yield(accumulator.apply(line, now: Date()))
             }
 
             guard !Task.isCancelled else { break }

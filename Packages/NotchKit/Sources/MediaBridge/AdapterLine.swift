@@ -35,8 +35,12 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
 
     /// Накладывает дифф на имеющийся снимок. Возвращает nil, если снимка ещё
     /// не было: дифф сам по себе не описывает трек целиком.
-    public func applied(to base: NowPlayingSnapshot?) -> NowPlayingSnapshot? {
+    ///
+    /// `now` используется ровно в одном случае — см. блок про перепривязку
+    /// метки времени ниже; для любого другого перехода он не влияет ни на что.
+    public func applied(to base: NowPlayingSnapshot?, now: Date) -> NowPlayingSnapshot? {
         guard var snapshot = base else { return nil }
+        let wasPlaying = snapshot.isPlaying
         if let title { snapshot.title = title }
         if let artist { snapshot.artist = artist }
         if let album { snapshot.album = album }
@@ -50,6 +54,22 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
         if let artworkMimeType { snapshot.artworkMimeType = artworkMimeType }
         if let parentApplicationBundleIdentifier {
             snapshot.parentApplicationBundleID = parentApplicationBundleIdentifier
+        }
+
+        // Play/pause-тумблер приходит парой диффов (спайк, раздел «Поток
+        // обновлений»): первая строка несёт только {"playing":true}, без
+        // собственной timestamp, вторая донесёт настоящую метку чуть позже.
+        // Без перепривязки здесь snapshot.timestamp остался бы тем, что было
+        // до этого диффа, — то есть моментом, когда трек ПОСТАВИЛИ на паузу,
+        // а не моментом, когда его возобновили. PlaybackPosition.current
+        // экстраполирует «now − timestamp» только пока isPlaying истинно, так
+        // что вся длительность паузы превращается в мнимый прогресс, и бар
+        // прыгает к концу трека до прихода второй строки диффа. Условие
+        // узкое нарочно: только переход false→true и только когда сам дифф
+        // не прислал timestamp — во всех остальных случаях значение адаптера
+        // (или его отсутствие) остаётся как есть.
+        if timestamp == nil, playing == true, !wasPlaying {
+            snapshot.timestamp = now
         }
         return snapshot
     }

@@ -69,6 +69,12 @@ func diffParsesAsPartial() throws {
     #expect(payload.title == nil)
 }
 
+/// Опорный момент «сейчас» для тестов `applied(to:now:)`. Само значение
+/// значения не имеет — важно, что оно фиксировано и отличимо от меток
+/// времени в снимках ниже, чтобы тест на перепривязку не мог случайно
+/// совпасть с уже имеющейся timestamp.
+private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
 @Test("дифф накладывается на снимок, не затирая незаданные поля")
 func diffMergesWithoutClobbering() throws {
     guard case .snapshot(let base?) = AdapterLine.parse(fullPayloadLine),
@@ -77,10 +83,47 @@ func diffMergesWithoutClobbering() throws {
         Issue.record("подготовка не удалась")
         return
     }
-    let merged = try #require(payload.applied(to: base))
+    let merged = try #require(payload.applied(to: base, now: now))
     #expect(merged.isPlaying == false)
     #expect(merged.title == "Deep Work Music")
     #expect(merged.sourceBundleID == "com.google.Chrome")
+}
+
+@Test("дифф playing:true без timestamp после паузы перепривязывает метку к now")
+func diffReanchorsTimestampOnFalseToTrueWithoutTimestamp() throws {
+    guard case .snapshot(let playingBase?) = AdapterLine.parse(fullPayloadLine),
+          case .diff(let payload) = AdapterLine.parse(#"{"type":"data","diff":true,"payload":{"playing":true}}"#)
+    else {
+        Issue.record("подготовка не удалась")
+        return
+    }
+    // fullPayloadLine несёт playing:true — для перехода false→true нужен
+    // именно приостановленный снимок.
+    var paused = playingBase
+    paused.isPlaying = false
+    let merged = try #require(payload.applied(to: paused, now: now))
+    #expect(merged.isPlaying == true)
+    #expect(merged.timestamp == now)
+}
+
+@Test("дифф playing:true со своим timestamp не перепривязывается к now")
+func diffKeepsAdapterTimestampWhenPresent() throws {
+    guard case .snapshot(let playingBase?) = AdapterLine.parse(fullPayloadLine) else {
+        Issue.record("подготовка не удалась")
+        return
+    }
+    var paused = playingBase
+    paused.isPlaying = false
+    let adapterTimestamp = Date(timeIntervalSince1970: 1_650_000_000)
+    guard case .diff(let payload) = AdapterLine.parse(
+        #"{"type":"data","diff":true,"payload":{"playing":true,"timestamp":"2022-04-15T05:20:00Z"}}"#
+    ) else {
+        Issue.record("подготовка не удалась")
+        return
+    }
+    let merged = try #require(payload.applied(to: paused, now: now))
+    #expect(merged.timestamp == adapterTimestamp)
+    #expect(merged.timestamp != now)
 }
 
 @Test("текст таймаута опознаётся как временная осечка, а не как мусор")
@@ -115,7 +158,7 @@ func diffBeforeSnapshotIsIgnored() {
         Issue.record("ожидался дифф")
         return
     }
-    let result = payload.applied(to: nil)
+    let result = payload.applied(to: nil, now: now)
     #expect(result == nil)
 }
 

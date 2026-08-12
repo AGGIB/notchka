@@ -33,15 +33,22 @@ public struct SnapshotAccumulator: Sendable {
     public init() {}
 
     /// Возвращает состояние после применения строки.
+    ///
+    /// `now` — инжектируемые часы, а не `Date()` внутри метода: этот тип
+    /// проверяется без запуска perl (см. doc выше), а часы, зашитые внутрь,
+    /// такую проверку бы исключили. Единственный потребитель значения —
+    /// `NowPlayingPayload.applied(to:now:)`, где `now` идёт в дело только при
+    /// переходе isPlaying false→true без собственной timestamp у диффа (см.
+    /// её doc-комментарий); для снимков и осечек параметр ни на что не влияет.
     @discardableResult
-    public mutating func apply(_ line: AdapterLine) -> NowPlayingSnapshot? {
+    public mutating func apply(_ line: AdapterLine, now: Date) -> NowPlayingSnapshot? {
         switch line {
         case .snapshot(let snapshot):
             current = snapshot
         case .diff(let payload):
             // Дифф до первого снимка описывает изменение неизвестно чего —
             // выдумывать по нему трек нельзя.
-            current = payload.applied(to: current)
+            current = payload.applied(to: current, now: now)
         case .transientFailure, .unrecognized:
             // Канал жив, конкретная строка бесполезна. Последний известный
             // трек остаётся на экране: гасить его было бы враньём наоборот.
