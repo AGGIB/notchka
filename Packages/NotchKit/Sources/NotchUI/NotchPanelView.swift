@@ -36,10 +36,24 @@ public struct NotchPanelView<Content: View>: View {
         )
         .fill(.black)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .shadow(color: accent.opacity(0.45), radius: 22, y: 10)
+        // Свечение только у раскрытой панели: в покое и в peek она по размеру
+        // близка к вырезу, и ореол вокруг чёрного на чёрном выдавал бы
+        // границу панели там, где её быть не должно.
+        .shadow(color: glowColor, radius: glowRadius, y: 6)
         .overlay(alignment: .top) { tabBody(in: size) }
         .animation(NotchMotion.animation(for: state, reduceMotion: reduceMotion), value: state)
         .animation(NotchMotion.accentFade, value: accent)
+    }
+
+    /// Цвет ореола. Прозрачный во всех состояниях, кроме раскрытого.
+    private var glowColor: Color {
+        if case .expanded = state { accent.opacity(0.28) } else { .clear }
+    }
+
+    /// Радиус ореола. Ноль вне раскрытого состояния, чтобы SwiftUI не тратил
+    /// проход размытия там, где цвет всё равно прозрачный.
+    private var glowRadius: CGFloat {
+        if case .expanded = state { 12 } else { 0 }
     }
 
     @ViewBuilder
