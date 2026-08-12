@@ -769,14 +769,31 @@ public actor AdapterProcess {
 
     /// Разовая команда управления. Отдельный короткоживущий процесс —
     /// у `stream` нет входного канала для команд.
+    ///
+    /// Ожидание асинхронное, а не через `waitUntilExit()`: синхронное
+    /// ожидание заняло бы поток актора на всё время жизни подпроцесса,
+    /// и `stop()` супервизора встал бы за ним в очередь, съедая бюджет
+    /// «меньше секунды на завершение».
     public func send(code: Int32) async throws {
         let process = Process()
         process.executableURL = paths.perl
         process.arguments = [paths.script.path, paths.framework.path, "send", String(code)]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            // Резолвится ровно один раз: либо отсюда после завершения
+            // процесса, либо из catch ниже, если он не смог запуститься —
+            // тогда terminationHandler системой не вызывается. Обработчик
+            // ставится ДО run(), иначе мгновенно завершившийся процесс
+            // успел бы отработать раньше, чем его есть кому услышать.
+            process.terminationHandler = { _ in continuation.resume() }
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
     }
 
     /// Останавливает поток. SIGINT, а не SIGKILL: спайк подтвердил, что
@@ -822,31 +839,43 @@ import Testing
 import Foundation
 @testable import MediaBridge
 
-/// Корень репозитория относительно файла теста.
+/// Корень репозитория относительно файла теста. Пять вызовов, а не четыре:
+/// первый снимает имя файла, остальные четыре — каталоги
+/// MediaBridgeTests, Tests, NotchKit, Packages.
 private var repoRoot: URL {
     URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()  // MediaBridgeTests
-        .deletingLastPathComponent()  // Tests
-        .deletingLastPathComponent()  // NotchKit
-        .deletingLastPathComponent()  // Packages
+        .deletingLastPathComponent()  // имя файла -> MediaBridgeTests
+        .deletingLastPathComponent()  // MediaBridgeTests -> Tests
+        .deletingLastPathComponent()  // Tests -> NotchKit
+        .deletingLastPathComponent()  // NotchKit -> Packages
+        .deletingLastPathComponent()  // Packages -> корень репозитория
+}
+
+/// Вынесено, чтобы условие трейта и тело теста не разошлись в том,
+/// что считают путём к адаптеру.
+private var adapterPaths: AdapterPaths {
+    AdapterPaths.vendored(repoRoot: repoRoot)
 }
 
 @Test("пути к вендоренному адаптеру абсолютны")
 func vendoredPathsAreAbsolute() {
-    let paths = AdapterPaths.vendored(repoRoot: repoRoot)
+    let paths = adapterPaths
     #expect(paths.script.path.hasPrefix("/"))
     #expect(paths.framework.path.hasPrefix("/"))
     #expect(paths.perl.path == "/usr/bin/perl")
 }
 
-/// Требует собранного фреймворка. Пропускается, если его нет: собирать
-/// адаптер ради теста незачем, а на машине разработчика он уже есть.
-@Test("поток адаптера отдаёт хотя бы одну разобранную строку")
+/// Требует собранного фреймворка. Пропуск делается трейтом `.enabled(if:)`,
+/// а НЕ провалом `#require` в теле: условие трейта вычисляется до тела, и
+/// Swift Testing помечает тест как skipped. Провалившийся `#require` — это
+/// всегда упавший тест, и сообщение «пропущен» в нём только вводит
+/// в заблуждение того, кто увидит красный прогон.
+@Test(
+    "поток адаптера отдаёт хотя бы одну разобранную строку",
+    .enabled(if: adapterPaths.existsOnDisk, "адаптер не собран, тест пропущен")
+)
 func streamYieldsParsedLine() async throws {
-    let paths = AdapterPaths.vendored(repoRoot: repoRoot)
-    try #require(paths.existsOnDisk, "адаптер не собран, тест пропущен")
-
-    let adapter = AdapterProcess(paths: paths)
+    let adapter = AdapterProcess(paths: adapterPaths)
     var received: AdapterLine?
     for await line in await adapter.lines() {
         received = line
