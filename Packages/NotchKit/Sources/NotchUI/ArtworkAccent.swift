@@ -19,21 +19,34 @@ public enum ArtworkAccent {
 
     /// Средний цвет картинки в HSB. Усреднение отрисовкой в 1×1 — самый
     /// дешёвый способ; точности «на глаз» для акцента достаточно.
+    ///
+    /// Создание контекста, отрисовка и чтение буфера обязаны идти внутри
+    /// одного `withUnsafeMutableBytes` — указатель, который context хранит и
+    /// пишет через него при `draw`, валиден только на время этого closure.
+    /// `&pixel`, переданный отдельным выражением в `CGContext(data:...)`
+    /// (как было раньше), валиден лишь на длительность самого вызова
+    /// инициализатора: компилятор вправе передать туда указатель на
+    /// временную копию буфера массива, а не на его настоящий storage, и то,
+    /// что на практике буфер не переезжает, — везение, а не гарантия.
     public static func hsb(from image: CGImage) -> (h: Double, s: Double, b: Double)? {
         var pixel = [UInt8](repeating: 0, count: 4)
         let space = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: &pixel, width: 1, height: 1, bitsPerComponent: 8,
-            bytesPerRow: 4, space: space,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        return pixel.withUnsafeMutableBytes { buffer -> (h: Double, s: Double, b: Double)? in
+            guard let baseAddress = buffer.baseAddress,
+                  let context = CGContext(
+                    data: baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                    bytesPerRow: 4, space: space,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  )
+            else { return nil }
 
-        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-        return rgbToHSB(
-            r: Double(pixel[0]) / 255,
-            g: Double(pixel[1]) / 255,
-            b: Double(pixel[2]) / 255
-        )
+            context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return rgbToHSB(
+                r: Double(buffer[0]) / 255,
+                g: Double(buffer[1]) / 255,
+                b: Double(buffer[2]) / 255
+            )
+        }
     }
 
     /// Поднимает яркость и насыщенность до порогов читаемости, не трогая оттенок.
