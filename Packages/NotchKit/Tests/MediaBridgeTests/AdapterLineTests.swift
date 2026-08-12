@@ -85,3 +85,25 @@ func blankLineIsUnrecognised() {
         return
     }
 }
+
+@Test("дифф до первого снимка не даёт состояния")
+func diffBeforeSnapshotIsIgnored() {
+    guard case .diff(let payload) = AdapterLine.parse(#"{"type":"data","diff":true,"payload":{"playing":true}}"#) else {
+        Issue.record("ожидался дифф")
+        return
+    }
+    let result = payload.applied(to: nil)
+    #expect(result == nil)
+}
+
+@Test("валидный JSON с «timed out» внутри разбирается как снимок, не как осечка")
+func jsonWithTimeoutInDataIsNotTransientFailure() {
+    let lineWithTimeoutInTitle = """
+    {"type":"data","diff":false,"payload":{"title":"Reading timed out","artist":"Test","album":"","duration":0,"elapsedTime":0,"timestamp":"2026-08-10T11:35:25Z","bundleIdentifier":"test","playing":false}}
+    """
+    guard case .snapshot(let snapshot?) = AdapterLine.parse(lineWithTimeoutInTitle) else {
+        Issue.record("ожидался снимок")
+        return
+    }
+    #expect(snapshot.title == "Reading timed out")
+}

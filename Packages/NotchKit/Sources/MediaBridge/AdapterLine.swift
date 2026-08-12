@@ -28,7 +28,7 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
     /// Накладывает дифф на имеющийся снимок. Возвращает nil, если снимка ещё
     /// не было: дифф сам по себе не описывает трек целиком.
     public func applied(to base: NowPlayingSnapshot?) -> NowPlayingSnapshot? {
-        guard var snapshot = base else { return asSnapshot() }
+        guard var snapshot = base else { return nil }
         if let title { snapshot.title = title }
         if let artist { snapshot.artist = artist }
         if let album { snapshot.album = album }
@@ -78,20 +78,29 @@ public enum AdapterLine: Sendable, Equatable {
         let payload: NowPlayingPayload
     }
 
+    /// Известный текст таймаута из адаптера. Проверяется перед разбором JSON
+    /// чтобы отличить временную осечку от невалидного входа.
+    private static let adapterTimeoutMessage = "timed out"
+
     public static func parse(_ line: String) -> AdapterLine {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .unrecognized(line) }
 
-        // Осечку адаптер печатает открытым текстом, не JSON-ом. Отличать её
-        // от мусора важно: супервизор не должен считать это падением канала.
-        if trimmed.contains("timed out") { return .transientFailure(trimmed) }
-
         guard let data = trimmed.data(using: .utf8) else { return .unrecognized(line) }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let envelope = try? decoder.decode(Envelope.self, from: data) else {
-            return .unrecognized(line)
+
+        // Проверка таймаута идёт после попытки разобрать JSON. Если строка
+        // — валидный JSON-объект, это не осечка адаптера, а просто данные.
+        // Только открытый текст может быть ошибкой таймаута.
+        if let envelope = try? decoder.decode(Envelope.self, from: data) {
+            return envelope.diff ? .diff(envelope.payload) : .snapshot(envelope.payload.asSnapshot())
         }
-        return envelope.diff ? .diff(envelope.payload) : .snapshot(envelope.payload.asSnapshot())
+
+        // Осечку адаптер печатает открытым текстом, не JSON-ом. Отличать её
+        // от мусора важно: супервизор не должен считать это падением канала.
+        if trimmed.contains(adapterTimeoutMessage) { return .transientFailure(trimmed) }
+
+        return .unrecognized(line)
     }
 }
