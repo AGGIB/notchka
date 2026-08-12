@@ -80,3 +80,24 @@ func repeatedSnapshotsAccessDoesNotStartSecondPump() async {
     _ = await provider.snapshots
     #expect(await provider.pumpsStarted == 1)
 }
+
+@Test("shutdown реально останавливает насос, а не просто просит отмены")
+func shutdownStopsPumpForGood() async {
+    let provider = AdapterProvider(paths: unreachablePaths)
+    _ = await provider.snapshots
+    await provider.shutdown()
+    // Если бы shutdown только запрашивал отмену, не дожидаясь завершения,
+    // следующее обращение могло бы застать насос ещё формально «активным»
+    // (задача отменена, но проверка !activePump.task.isCancelled уже
+    // должна была бы это заметить в любом случае) — проверяем более сильное
+    // свойство: после shutdown снова поднимается настоящий новый насос.
+    _ = await provider.snapshots
+    #expect(await provider.pumpsStarted == 2)
+}
+
+@Test("shutdown без единого обращения к snapshots не падает")
+func shutdownWithoutPriorAccessIsSafe() async {
+    let provider = AdapterProvider(paths: unreachablePaths)
+    await provider.shutdown()
+    #expect(await provider.pumpsStarted == 0)
+}

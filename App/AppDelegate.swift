@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import NotchCore
 import NotchUI
+import MediaBridge
+import Dispatch
 import os
 
 @MainActor
@@ -12,6 +14,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Токен подписки на смену конфигурации экранов — хранится, чтобы снять
     /// подписку в deinit.
     private var screenParametersObserver: NSObjectProtocol?
+    /// Источник сигнала SIGTERM — хранится, иначе GCD освободит его сразу
+    /// после resume() и обработчик никогда не сработает.
+    private var terminationSource: (any DispatchSourceSignal)?
+
+    /// Корень репозитория, где лежит вендоренная копия адаптера.
+    ///
+    /// Вычисляется от расположения этого файла на диске: сейчас приложение
+    /// работает только из дерева исходников (см. AdapterPaths.vendored), и
+    /// другого способа найти vendor/ нет. В плане 4 адаптер переезжает
+    /// внутрь бандла приложения — тогда это единственное место обновится на
+    /// путь внутри Bundle.main, а не на вычисление через #filePath.
+    private static let developmentRepoRoot: URL = {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // AppDelegate.swift -> App
+            .deletingLastPathComponent()  // App -> корень репозитория
+    }()
+
+    /// Модель музыки живёт весь срок работы приложения, а не пересоздаётся
+    /// вместе с панелью в refreshNotchScreen(): адаптеру и его
+    /// perl-подпроцессу нет дела до геометрии чёлки, которая может пропадать
+    /// и появляться (закрытая крышка, смена монитора) независимо от того,
+    /// играет ли в этот момент музыка. Пересоздавать пайплайн на каждое
+    /// такое событие означало бы бессмысленно перезапускать внешний процесс.
+    private let musicModel = MusicViewModel(
+        provider: AdapterProvider(paths: AdapterPaths.vendored(repoRoot: developmentRepoRoot))
+    )
 
     private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "AppDelegate")
 
@@ -24,6 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installTerminationHandling()
+        musicModel.start()
         refreshNotchScreen()
 
         // Единственное уведомление AppKit, покрывающее сразу докинг/раздокинг
@@ -50,6 +80,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let screenParametersObserver {
                 NotificationCenter.default.removeObserver(screenParametersObserver)
             }
+        }
+    }
+
+    /// SIGTERM — то, чем `pkill -x Notchka` (сейчас единственный способ
+    /// остановить это приложение: у accessory-приложения без Dock-иконки
+    /// нет пункта меню «Quit») завершает процесс. По умолчанию это
+    /// происходит мгновенно, в обход AppKit и раскрутки стека Swift — ни
+    /// один deinit не выполняется, adapter-подпроцесс осиротевает.
+    /// Подтверждено ручной проверкой: без этого обработчика `pgrep -f
+    /// mediaremote-adapter` после `pkill -x Notchka` находил живой процесс.
+    ///
+    /// `signal(SIGTERM, SIG_IGN)` обязателен и должен идти первым — иначе
+    /// DispatchSourceSignal сигнал не перехватит. Это задокументированное
+    /// требование GCD, а не предположение.
+    private func installTerminationHandling() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { [weak self] in
+            // Источник сигнала выполняет обработчик на очереди .main, то
+            // есть фактически на том же потоке, что MainActor, — тот же
+            // приём и то же обоснование, что в HotkeyCenter.onFire.
+            MainActor.assumeIsolated { self?.shutDown() }
+        }
+        source.resume()
+        terminationSource = source
+    }
+
+    /// Останавливает адаптер и только потом завершает процесс.
+    ///
+    /// Task {} здесь безопасен и не виснет: обработчик GCD выше выполняется
+    /// на обычной main-очереди, а не в контексте сырого сигнала, поэтому
+    /// планирование async-работы и дальнейшая раскрутка событийного цикла
+    /// ничем не блокированы. exit(0), а не NSApp.terminate(_:) — нужна
+    /// гарантия, что процесс не завершится раньше, чем musicModel.stopAdapter()
+    /// реально отправит SIGINT адаптеру и дождётся его; NSApp.terminate(_:)
+    /// такой гарантии не даёт.
+    private func shutDown() {
+        Task {
+            await musicModel.stopAdapter()
+            exit(0)
         }
     }
 
@@ -92,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel: panel
         )
         panel.contentView = NSHostingView(
-            rootView: NotchRootView(controller: controller, notchSize: geometry.notchRect.size)
+            rootView: NotchRootView(controller: controller, notchSize: geometry.notchRect.size, musicModel: musicModel)
         )
         controller.start()
         self.controller = controller
@@ -118,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Мост между контроллером и оболочкой панели.
+/// Мост между контроллером/моделью музыки и оболочкой панели.
 ///
 /// NotchPanelView лежит в NotchUI и принимает NotchState значением, а не
 /// сам контроллер, — иначе AppKit-независимый пакет пришлось бы завязывать
@@ -126,19 +196,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// body: Observation подписывается на свойство только там, где оно было
 /// прочитано во время отрисовки, — вычисли это значение один раз в
 /// refreshNotchScreen() и передай константой, подписки бы не возникло, и
-/// панель навсегда застыла бы в состоянии на момент запуска.
+/// панель навсегда застыла бы в состоянии на момент запуска. То же самое
+/// рассуждение относится и к musicModel — это тоже @Observable, и его
+/// свойства (track/position/artwork/accent) читаются здесь же, внутри body
+/// (через content(for:), вызываемый непосредственно из body), а не заранее.
 private struct NotchRootView: View {
     let controller: NotchController
     let notchSize: CGSize
+    let musicModel: MusicViewModel
+
+    /// Раскрыта ли панель, независимо от того, какая именно вкладка внутри.
+    /// Брифом задано именно такое условие для обновления позиции трека:
+    /// `if case .expanded = controller.state`, без привязки к вкладке.
+    private var isExpanded: Bool {
+        if case .expanded = controller.state { return true }
+        return false
+    }
 
     var body: some View {
         NotchPanelView(
             state: controller.state,
             notchSize: notchSize,
-            // Константа до Task 8: акцент из обложки (ArtworkAccent,
-            // готов с Task 6) подключается вместе с самим плеером.
-            accent: .white
+            accent: musicModel.accent
         ) { tab in
+            content(for: tab)
+        }
+        .task(id: isExpanded) {
+            // Позиция трека не хранится тикающей (см.
+            // MusicViewModel.refreshPosition) — кто-то обязан дёргать
+            // пересчёт периодически, пока панель действительно раскрыта.
+            // .task(id:) сам отменяет предыдущий прогон и не запускает
+            // новый, пока id не станет true: на закрытой и на приоткрытой
+            // (peek) панели цикл ниже не крутится вовсе, а не просто ничего
+            // не делает на каждом шаге — именно это спека называет «спать
+            // в покое».
+            guard isExpanded else { return }
+            while !Task.isCancelled {
+                musicModel.refreshPosition()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    /// Вкладка музыки подключена по-настоящему; остальные три ждут своих
+    /// планов и по-прежнему показывают ту же заглушку, что и раньше —
+    /// оболочка не должна знать, что у них внутри.
+    @ViewBuilder
+    private func content(for tab: NotchTab) -> some View {
+        switch tab {
+        case .music:
+            MusicTabView(
+                track: musicModel.track,
+                position: musicModel.position,
+                artwork: musicModel.artwork,
+                accent: musicModel.accent
+            ) { musicModel.handle($0) }
+        default:
             Text(String(describing: tab))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))

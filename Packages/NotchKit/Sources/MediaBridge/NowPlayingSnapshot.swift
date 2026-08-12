@@ -15,9 +15,20 @@ public struct NowPlayingSnapshot: Sendable, Equatable {
     public var playbackRate: Double
     public var isPlaying: Bool
     /// Bundle id приложения-источника: по нему UI показывает, откуда играет.
+    /// Для источников, рендерящих медиа в отдельном вспомогательном
+    /// процессе (см. `parentApplicationBundleID`), это bundle id именно
+    /// помощника, а не самого приложения — таким его отдаёт MediaRemote.
     public var sourceBundleID: String
     public var artworkData: Data?
     public var artworkMimeType: String?
+    /// Bundle id родительского приложения, если `sourceBundleID` — это
+    /// вспомогательный процесс. Находка Task 4: Safari рендерит медиа в
+    /// процессе `com.apple.WebKit.GPU`, и только это поле указывает на
+    /// `com.apple.Safari` — само приложение, которое стоит показывать
+    /// пользователю. nil значит, что адаптер не прислал родителя: либо
+    /// sourceBundleID уже и есть настоящее приложение, либо адаптер не
+    /// распознал в источнике чей-то вспомогательный процесс.
+    public var parentApplicationBundleID: String?
 
     public init(
         title: String,
@@ -30,7 +41,8 @@ public struct NowPlayingSnapshot: Sendable, Equatable {
         isPlaying: Bool,
         sourceBundleID: String,
         artworkData: Data?,
-        artworkMimeType: String?
+        artworkMimeType: String?,
+        parentApplicationBundleID: String? = nil
     ) {
         self.title = title
         self.artist = artist
@@ -43,5 +55,6 @@ public struct NowPlayingSnapshot: Sendable, Equatable {
         self.sourceBundleID = sourceBundleID
         self.artworkData = artworkData
         self.artworkMimeType = artworkMimeType
+        self.parentApplicationBundleID = parentApplicationBundleID
     }
 }

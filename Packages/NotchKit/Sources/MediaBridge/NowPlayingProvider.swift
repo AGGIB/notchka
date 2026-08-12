@@ -13,6 +13,14 @@ public protocol NowPlayingProvider: Sendable {
     /// (`AdapterProvider` рассчитан ровно на одного).
     var snapshots: AsyncStream<NowPlayingSnapshot?> { get async }
     func send(_ command: MediaCommand) async throws
+
+    /// Останавливает пайплайн и гарантированно дожидается завершения —
+    /// вызывающая сторона (см. AppDelegate) полагается на то, что после
+    /// возврата отсюда никакой сторонний процесс уже не работает. Нужен
+    /// отдельно от простого «отменить и забыть»: при завершении приложения
+    /// полагаться на deinit нельзя — AppKit заканчивает процесс через
+    /// exit(), в обход раскрутки стека Swift и деинициализаторов.
+    func shutdown() async
 }
 
 /// Склейка потока адаптера в текущее состояние.

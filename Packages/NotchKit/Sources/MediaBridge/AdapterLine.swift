@@ -14,6 +14,14 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
     public var bundleIdentifier: String?
     public var artworkData: Data?
     public var artworkMimeType: String?
+    /// Bundle id родительского приложения — приходит отдельно от
+    /// `bundleIdentifier`, когда источник на самом деле вспомогательный
+    /// процесс. Находка Task 4: Safari отдаёт `bundleIdentifier ==
+    /// "com.apple.WebKit.GPU"` (процесс рендеринга), а это поле несёт
+    /// настоящее приложение, `"com.apple.Safari"`. У большинства
+    /// источников (Chrome напрямую и т.п.) адаптер это поле не присылает
+    /// вовсе — nil, а не пустая строка.
+    public var parentApplicationBundleIdentifier: String?
 
     public init() {}
 
@@ -22,7 +30,7 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
         title == nil && artist == nil && album == nil && duration == nil
             && elapsedTime == nil && timestamp == nil && playbackRate == nil
             && playing == nil && bundleIdentifier == nil && artworkData == nil
-            && artworkMimeType == nil
+            && artworkMimeType == nil && parentApplicationBundleIdentifier == nil
     }
 
     /// Накладывает дифф на имеющийся снимок. Возвращает nil, если снимка ещё
@@ -40,6 +48,9 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
         if let bundleIdentifier { snapshot.sourceBundleID = bundleIdentifier }
         if let artworkData { snapshot.artworkData = artworkData }
         if let artworkMimeType { snapshot.artworkMimeType = artworkMimeType }
+        if let parentApplicationBundleIdentifier {
+            snapshot.parentApplicationBundleID = parentApplicationBundleIdentifier
+        }
         return snapshot
     }
 
@@ -58,7 +69,8 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
             isPlaying: playing ?? false,
             sourceBundleID: bundleIdentifier ?? "",
             artworkData: artworkData,
-            artworkMimeType: artworkMimeType
+            artworkMimeType: artworkMimeType,
+            parentApplicationBundleID: parentApplicationBundleIdentifier
         )
     }
 }

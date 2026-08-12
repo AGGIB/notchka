@@ -25,6 +25,29 @@ func fullSnapshotParses() throws {
     #expect(abs(snapshot.duration - 7279.961) < 0.001)
     #expect(abs(snapshot.elapsedTime - 200.349576) < 0.001)
     #expect(snapshot.artworkData != nil)
+    // Chrome в этом payload заявляет себя напрямую — родителя адаптер не
+    // присылает, и это должно остаться nil, а не пустой строкой.
+    #expect(snapshot.parentApplicationBundleID == nil)
+}
+
+/// Payload вспомогательного процесса Safari — эмпирическая находка Task 4:
+/// `bundleIdentifier` указывает на процесс рендеринга WebKit, а настоящее
+/// приложение приходит отдельным полем `parentApplicationBundleIdentifier`.
+private let safariPayloadLine = """
+{"type":"data","diff":false,"payload":{"bundleIdentifier":"com.apple.WebKit.GPU",\
+"parentApplicationBundleIdentifier":"com.apple.Safari","title":"Трек",\
+"artist":"Исполнитель","album":"","duration":200,"elapsedTime":0,\
+"timestamp":"2026-08-10T11:35:25Z","playbackRate":1,"playing":true}}
+"""
+
+@Test("вспомогательный процесс несёт bundle id родителя отдельным полем")
+func helperProcessCarriesParentBundleID() throws {
+    guard case .snapshot(let snapshot?) = AdapterLine.parse(safariPayloadLine) else {
+        Issue.record("ожидался снимок")
+        return
+    }
+    #expect(snapshot.sourceBundleID == "com.apple.WebKit.GPU")
+    #expect(snapshot.parentApplicationBundleID == "com.apple.Safari")
 }
 
 @Test("служебная первая строка потока значит «ничего не играет»")

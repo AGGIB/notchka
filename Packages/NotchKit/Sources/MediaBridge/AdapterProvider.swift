@@ -58,6 +58,21 @@ public actor AdapterProvider: NowPlayingProvider {
         try await adapter.send(code: command.adapterCode)
     }
 
+    /// Немедленно и гарантированно останавливает насос: не просто просит
+    /// отмены, а дожидается, пока pump(into:) реально дойдёт до конца
+    /// (его собственный хвост уже шлёт SIGINT адаптеру через process?.stop()
+    /// и закрывает continuation — см. pump(into:) ниже). Ленивого
+    /// распространения отмены через AsyncStream (как это происходит при
+    /// обычном отключении последнего потребителя) здесь недостаточно: тот
+    /// путь ничего не гарантирует ВЫЗЫВАЮЩЕЙ стороне о том, что процесс уже
+    /// остановлен к моменту возврата, а именно эта гарантия нужна перед
+    /// выходом из приложения.
+    public func shutdown() async {
+        guard let activePump else { return }
+        activePump.task.cancel()
+        await activePump.task.value
+    }
+
     /// Поднимает новый насос и запоминает его в `activePump`.
     ///
     /// `AsyncStream.makeStream`, а не `AsyncStream.init(_:)` с замыканием:
