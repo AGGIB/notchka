@@ -26,6 +26,26 @@ public actor AdapterProvider: NowPlayingProvider {
     /// проверку заменяет, не запуская perl.
     private(set) var pumpsStarted = 0
 
+    /// Сколько поток обязан прожить, чтобы адаптер считался рабочим, а не
+    /// умирающим сразу после подключения.
+    ///
+    /// Спайк намерил: первая строка после подключения — всегда служебная
+    /// `{"diff":false,"payload":{}}`, а на команду до появления diff-строк в
+    /// потоке уходят «сотни миллисекунд», не единицы секунд. 5 секунд —
+    /// с большим запасом выше этого шума (старт процесса, первая строка,
+    /// пара обменов), но заметно меньше первой по-настоящему чувствительной
+    /// паузы эскалации, так что честно живой, но медленный адаптер не
+    /// штрафуется наравне с тем, что падает сразу за служебной строкой.
+    static let restartLivenessThreshold: TimeInterval = 5
+
+    /// Чистая проверка «прожил достаточно», вынесенная из `pump(into:)`
+    /// отдельной функцией специально ради юнит-теста: сам `pump` гоняет
+    /// настоящий процесс адаптера и подъёмом изолированного потока не
+    /// проверяется без perl, а эта проверка — обычное сравнение дат.
+    static func survivedLongEnoughToResetBackoff(openedAt: Date, closedAt: Date) -> Bool {
+        closedAt.timeIntervalSince(openedAt) >= Self.restartLivenessThreshold
+    }
+
     public init(paths: AdapterPaths) {
         self.paths = paths
     }
@@ -106,18 +126,25 @@ public actor AdapterProvider: NowPlayingProvider {
         while !Task.isCancelled {
             let adapter = AdapterProcess(paths: paths)
             process = adapter
-            var sawAnything = false
+            let openedAt = Date()
 
             for await line in await adapter.lines() {
-                sawAnything = true
                 continuation.yield(accumulator.apply(line, now: Date()))
             }
 
             guard !Task.isCancelled else { break }
 
-            // Поток, проживший достаточно, чтобы что-то отдать, считается
-            // рабочим: следующий обрыв начнёт отсчёт пауз заново.
-            if sawAnything { policy.reset() }
+            // Живучесть меряется временем жизни потока, а не фактом «пришла
+            // ли хоть одна строка»: спайк установил, что первая строка после
+            // подключения — всегда служебная {"diff":false,"payload":{}},
+            // даже если адаптер падает сразу вслед за ней. Судить по факту
+            // любой строки означало бы сбрасывать паузу на каждой попытке
+            // для адаптера, который умер навсегда, — ровно тот случай, ради
+            // которого нарастающий backoff и существует; он бы держался на
+            // нижней ступени бесконечно вместо того, чтобы вырасти до потолка.
+            if Self.survivedLongEnoughToResetBackoff(openedAt: openedAt, closedAt: Date()) {
+                policy.reset()
+            }
             let delay = policy.nextDelay()
             logger.notice("поток адаптера оборван, повтор через \(delay, privacy: .public) с")
             try? await Task.sleep(for: .seconds(delay))

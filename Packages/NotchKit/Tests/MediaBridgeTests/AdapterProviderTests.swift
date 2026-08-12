@@ -114,6 +114,33 @@ func diffKeepingPlayingTrueWithoutTimestampDoesNotReanchor() {
     #expect(updated?.timestamp == base.timestamp)
 }
 
+// `survivedLongEnoughToResetBackoff` — чистая функция сравнения дат,
+// вынесенная из pump(into:) именно чтобы её можно было проверить без
+// подъёма настоящего процесса адаптера (сам pump() юнит-тестом не покрыт —
+// см. отчёт: до реального процесса или его правдоподобной подмены дело не
+// доходит ни в одном тесте этого файла).
+
+@Test("поток короче порога не сбрасывает нарастающую паузу")
+func briefStreamDoesNotResetBackoff() {
+    let opened = Date(timeIntervalSince1970: 1_000_000)
+    let closedQuickly = opened.addingTimeInterval(0.2)
+    #expect(AdapterProvider.survivedLongEnoughToResetBackoff(openedAt: opened, closedAt: closedQuickly) == false)
+}
+
+@Test("поток дольше порога сбрасывает нарастающую паузу")
+func longStreamResetsBackoff() {
+    let opened = Date(timeIntervalSince1970: 1_000_000)
+    let closedLater = opened.addingTimeInterval(AdapterProvider.restartLivenessThreshold + 1)
+    #expect(AdapterProvider.survivedLongEnoughToResetBackoff(openedAt: opened, closedAt: closedLater) == true)
+}
+
+@Test("поток ровно на пороге считается достаточно живым")
+func thresholdBoundaryResetsBackoff() {
+    let opened = Date(timeIntervalSince1970: 1_000_000)
+    let closedAtThreshold = opened.addingTimeInterval(AdapterProvider.restartLivenessThreshold)
+    #expect(AdapterProvider.survivedLongEnoughToResetBackoff(openedAt: opened, closedAt: closedAtThreshold) == true)
+}
+
 /// Заведомо несуществующие пути: `AdapterProcess.lines()` падает на
 /// `process.run()` мгновенно (ENOENT), реального процесса не возникает —
 /// тест ничего не запускает и не зависит от собранного адаптера.
