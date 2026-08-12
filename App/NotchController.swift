@@ -16,8 +16,8 @@ final class NotchController {
     @ObservationIgnored private var debouncer = HoverDebouncer()
     @ObservationIgnored private let cursor = CursorMonitor()
     @ObservationIgnored private let hotkey = HotkeyCenter()
-    @ObservationIgnored private let geometry: NotchGeometry
-    @ObservationIgnored private let screenFrame: CGRect
+    @ObservationIgnored private var geometry: NotchGeometry
+    @ObservationIgnored private var screenFrame: CGRect
     @ObservationIgnored private weak var panel: NotchPanel?
 
     init(geometry: NotchGeometry, screenFrame: CGRect, panel: NotchPanel) {
@@ -41,6 +41,17 @@ final class NotchController {
             cursor.stop()
             hotkey.unregister()
         }
+    }
+
+    /// Обновляет геометрию при смене конфигурации экранов — вызывается из
+    /// AppDelegate по NSApplication.didChangeScreenParametersNotification.
+    /// Видимое состояние панели не трогаем: экран сдвинулся, а не закрылся,
+    /// открытая панель не обязана из-за этого схлопнуться. Мониторы курсора
+    /// и хоткея тоже не трогаем — их пересоздание принадлежит AppDelegate,
+    /// когда чёлка пропадает или появляется целиком, а не просто двигается.
+    func updateGeometry(_ geometry: NotchGeometry, screenFrame: CGRect) {
+        self.geometry = geometry
+        self.screenFrame = screenFrame
     }
 
     func handle(_ event: NotchEvent) {
