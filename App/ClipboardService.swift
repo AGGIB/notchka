@@ -126,7 +126,21 @@ final class ClipboardService {
             // картинки, картинка раньше текста, по той же причине (файл
             // может нести текстовое или графическое представление, но
             // показать его в истории надо файлом).
-            if let fileName = content.fileName, let fileData = content.fileData {
+            if let fileName = content.fileName, let fileURL = content.fileURL {
+                // Байты файла читаются здесь, а не в PasteboardReader.read():
+                // там главный поток, и обычное «скопировать файл» с сетевого
+                // диска остановило бы весь цикл событий вместе с отрисовкой
+                // панели. Здесь же это после фильтра — на отвергнутое
+                // содержимое ввод-вывод не тратится вовсе.
+                guard let fileData = try? Data(contentsOf: fileURL) else {
+                    // Между опросом и этим моментом файл могли переместить или
+                    // удалить. Не повод для тревоги, но и не повод молчать:
+                    // иначе пропажа записи в истории ничем не объяснима.
+                    logger.notice(
+                        "файл \(fileName, privacy: .public) не прочитан, в историю не попал"
+                    )
+                    return
+                }
                 try repository.saveFile(fileData, fileName: fileName, source: source)
             } else if let image = content.image {
                 try repository.saveImage(image, source: source)
