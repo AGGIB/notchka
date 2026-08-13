@@ -360,6 +360,13 @@ private struct NotchRootView: View {
     /// подключённые заметки и пины.
     let clipboardModel: ClipboardViewModel?
 
+    /// Разрешение Accessibility, прочитанное на момент последней проверки.
+    /// AXIsProcessTrusted() не даёт уведомлений о своей выдаче, поэтому само
+    /// объявление этого свойства не гарантирует актуальность значения —
+    /// её держит цикл опроса в .task(id: isClipboardTabActive) ниже, пока
+    /// вкладка буфера открыта и разрешения ещё нет.
+    @State private var isAccessibilityTrusted = AccessibilityPermission.isTrusted
+
     /// Раскрыта ли панель, независимо от того, какая именно вкладка внутри.
     /// Брифом задано именно такое условие для обновления позиции трека:
     /// `if case .expanded = controller.state`, без привязки к вкладке.
@@ -413,6 +420,29 @@ private struct NotchRootView: View {
             guard isClipboardTabActive, let clipboardModel else { return }
             await clipboardModel.refresh()
         }
+        .task(id: isClipboardTabActive) {
+            // Тикающий цикл, в отличие от refresh() выше, — и здесь это
+            // обязательно, а не выбор стиля: уход курсора из раскрытой
+            // панели её не закрывает (см. NotchStateMachine — «работа с
+            // лентой буфера подразумевает движение мыши куда угодно»), а
+            // клик по «Открыть настройки» не бросает Esc и не жмёт хоткей.
+            // Значит пользователь может уйти в Настройки и вернуться, ни разу
+            // не покинув .expanded(.clipboard) — единственный способ
+            // подхватить выданное разрешение в этом случае без перезапуска
+            // приложения (решение №3 постановки задачи 10) — переопрашивать
+            // самим, пока вкладка буфера открыта. Раз в секунду — тот же
+            // порядок, что и у позиции трека в соседнем task(id:) выше.
+            // Проверка происходит сразу при входе на вкладку, без ожидания
+            // первого тика, и цикл останавливается сам, как только
+            // разрешение выдано: опрашивать после этого нечего, а в покое
+            // приложение обязано спать — то же правило, что и у refresh() выше.
+            guard isClipboardTabActive, clipboardModel != nil else { return }
+            while !Task.isCancelled {
+                isAccessibilityTrusted = AccessibilityPermission.isTrusted
+                guard !isAccessibilityTrusted else { return }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     /// Вкладки музыки и буфера подключены по-настоящему; заметки и пины
@@ -436,21 +466,42 @@ private struct NotchRootView: View {
             ) { musicModel.togglePlayback() }
         case .clipboard:
             if let clipboardModel {
-                ClipboardTabView(
-                    cards: clipboardModel.cards,
-                    selected: clipboardModel.selectedID,
-                    accent: musicModel.accent,
-                    onActivate: { id in
-                        // frontmostApplicationBeforeExpanding, а не
-                        // NSWorkspace.frontmostApplication здесь и сейчас:
-                        // фокус к моменту клика уже у самой Notchka (решение
-                        // №3 постановки).
-                        clipboardModel.activate(
-                            id: id, frontmostApplication: controller.frontmostApplicationBeforeExpanding
-                        )
-                    },
-                    onCopyOnly: { id in clipboardModel.copyOnly(id: id) }
-                )
+                // Ветвление вынесено в чистую функцию (ClipboardTabContent
+                // .resolve, NotchUI) — здесь только читаем её результат, сам
+                // выбор проверен тестом без окна (см. PermissionPromptViewTests).
+                switch ClipboardTabContent.resolve(isAccessibilityTrusted: isAccessibilityTrusted) {
+                case .ribbon:
+                    ClipboardTabView(
+                        cards: clipboardModel.cards,
+                        selected: clipboardModel.selectedID,
+                        accent: musicModel.accent,
+                        onActivate: { id in
+                            // frontmostApplicationBeforeExpanding, а не
+                            // NSWorkspace.frontmostApplication здесь и сейчас:
+                            // фокус к моменту клика уже у самой Notchka (решение
+                            // №3 постановки).
+                            clipboardModel.activate(
+                                id: id, frontmostApplication: controller.frontmostApplicationBeforeExpanding
+                            )
+                        },
+                        onCopyOnly: { id in clipboardModel.copyOnly(id: id) }
+                    )
+                case .permissionPrompt:
+                    PermissionPromptView(
+                        onRequestPermission: {
+                            // Системный диалог — только по этому явному нажатию,
+                            // никогда сам по себе при запуске или раскрытии
+                            // панели (решение №2 постановки задачи 10). Присваиваем
+                            // возвращаемое значение сразу: оно почти всегда false
+                            // (диалог только что появился, пользователь ещё не
+                            // ответил), но если разрешение уже было выдано другим
+                            // путём и опрос ниже до этого не дошёл — не заставляем
+                            // ждать лишний тик.
+                            isAccessibilityTrusted = AccessibilityPermission.requestIfNeeded()
+                        },
+                        onOpenSettings: AccessibilityPermission.openSettings
+                    )
+                }
             } else {
                 TabPlaceholderView(tab: tab)
             }
