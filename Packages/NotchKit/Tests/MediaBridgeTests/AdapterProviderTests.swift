@@ -178,3 +178,13 @@ func shutdownWithoutPriorAccessIsSafe() async {
     await provider.shutdown()
     #expect(await provider.pumpsStarted == 0)
 }
+
+/// refresh() не throws (см. сигнатуру в NowPlayingProvider) — сбой запуска
+/// get на недостижимых путях обязан свестись к nil, а не прорваться наружу
+/// необработанным throw и не подвесить вызывающую сторону.
+@Test("refresh на недостижимых путях не падает и возвращает nil")
+func refreshOnUnreachablePathsReturnsNil() async {
+    let provider = AdapterProvider(paths: unreachablePaths)
+    let snapshot = await provider.refresh()
+    #expect(snapshot == nil)
+}

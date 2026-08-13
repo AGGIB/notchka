@@ -376,6 +376,12 @@ private struct NotchRootView: View {
     /// вкладка буфера открыта и разрешения ещё нет.
     @State private var isAccessibilityTrusted = AccessibilityPermission.isTrusted
 
+    /// Минимальный промежуток между периодическими пересинхронизациями (см.
+    /// MusicViewModel.resync() и .task(id: isExpanded) ниже). Каждая дёргает
+    /// отдельный процесс perl — вшестеро чаще, чем раз в секунду, которым
+    /// тикает позиция трека, плодить их незачем.
+    private static let resyncInterval: TimeInterval = 5
+
     /// Раскрыта ли панель, независимо от того, какая именно вкладка внутри.
     /// Брифом задано именно такое условие для обновления позиции трека:
     /// `if case .expanded = controller.state`, без привязки к вкладке.
@@ -415,9 +421,33 @@ private struct NotchRootView: View {
             // не делает на каждом шаге — именно это спека называет «спать
             // в покое».
             guard isExpanded else { return }
+            // Пересинхронизация ровно один раз здесь, до входа в цикл, а не
+            // внутри while ниже: там она звала бы get на каждую секунду
+            // раскрытой панели, а это отдельный процесс perl на каждый тик
+            // (см. MusicViewModel.resync()). Этого разового вызова хватает
+            // на случай «интерцепция уже закончилась к моменту, когда
+            // пользователь открыл панель» — не дожидаясь первого тика
+            // периодической пересинхронизации в соседнем .task(id:) ниже.
+            await musicModel.resync()
             while !Task.isCancelled {
                 musicModel.refreshPosition()
                 try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        .task(id: isExpanded) {
+            // Периодическая пересинхронизация — отдельным .task(id:) на том
+            // же isExpanded, а не веткой внутри секундного цикла позиции
+            // выше: у неё свой период (Self.resyncInterval, не чаще раза в
+            // 5 секунд — get поднимает отдельный процесс perl, ежесекундно
+            // так нельзя), и раздельные циклы не завязывают один период на
+            // другой. Ловит случай «интерцепция закончилась, пока панель уже
+            // была открыта» — разовый вызов в соседнем .task(id:) выше
+            // случается только в момент раскрытия и этот случай не видит.
+            guard isExpanded else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.resyncInterval))
+                guard !Task.isCancelled else { break }
+                await musicModel.resync()
             }
         }
         .task(id: isClipboardTabActive) {

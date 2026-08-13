@@ -51,3 +51,20 @@ func streamYieldsParsedLine() async throws {
     await adapter.stop()
     #expect(received != nil)
 }
+
+/// Разовый `get` против настоящего процесса — то же обоснование трейта, что
+/// у streamYieldsParsedLine() выше. Не проверяет содержимое снимка: играет
+/// ли что-то прямо сейчас на машине, где запущен тест, — состояние среды,
+/// а не свойство кода, и nil («сейчас ничего не играет»), и непустой снимок
+/// — оба легитимные исходы живого запроса. Проверяется то, что без
+/// настоящего процесса не проверить никак: что запрос к живому адаптеру
+/// доезжает до конца (не бросает, не виснет на чтении трубы вывода).
+@Test(
+    "get не виснет и отдаёт распознанный ответ живого адаптера",
+    .enabled(if: adapterPaths.existsOnDisk, "адаптер не собран, тест пропущен")
+)
+func getReturnsStateFromLiveAdapter() async throws {
+    let paths = adapterPaths
+    let adapter = AdapterProcess(paths: paths)
+    _ = try await adapter.get()
+}
