@@ -60,3 +60,28 @@ func missingBlobThrows() throws {
     let store = try makeStore()
     #expect(throws: (any Error).self) { try store.data(at: "aa/несуществующий") }
 }
+
+/// Остальные проверки объёма сравнивают его сам с собой: «не вырос»,
+/// «обнулился». Их прошла бы и реализация, всегда возвращающая ноль, —
+/// а на этом числе держится бюджет объёма в RetentionPolicy, и заниженный
+/// ответ там означает, что вытеснение просто не сработает.
+@Test("объём считается в реальных байтах, а не приблизительно")
+func totalSizeCountsActualBytes() throws {
+    let store = try makeStore()
+    try store.store(Data(repeating: 1, count: 3000))
+    #expect(try store.totalSize() == 3000)
+
+    try store.store(Data(repeating: 2, count: 500))
+    #expect(try store.totalSize() == 3500)
+}
+
+/// Удаление уже удалённого приходит из вытеснения, которое может сойтись
+/// по времени с ручным удалением того же блоба. Это должно быть тихо.
+@Test("повторное удаление не бросает")
+func removingTwiceIsQuiet() throws {
+    let store = try makeStore()
+    let path = try store.store(Data("дважды".utf8))
+    try store.remove(at: path)
+    try store.remove(at: path)
+    #expect(try store.totalSize() == 0)
+}
