@@ -20,6 +20,8 @@ targets:
         product: NotchCore
       - package: NotchKit
         product: NotchUI
+      - package: NotchKit
+        product: MediaBridge
     info:
       path: App/Info.plist
       properties:

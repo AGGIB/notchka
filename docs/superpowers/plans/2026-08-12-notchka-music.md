@@ -199,6 +199,25 @@ func blankLineIsUnrecognised() {
         return
     }
 }
+
+@Test("дифф без предшествующего снимка не сочиняет состояние")
+func diffBeforeSnapshotIsIgnored() {
+    var payload = NowPlayingPayload()
+    payload.playing = true
+    // Иначе получился бы снимок «играет неизвестно что»: пустое название,
+    // нулевая длительность, метка времени в начале эпохи.
+    #expect(payload.applied(to: nil) == nil)
+}
+
+@Test("валидный JSON со словами про таймаут внутри данных не считается осечкой")
+func jsonWithTimeoutInDataIsNotTransientFailure() {
+    let line = #"{"type":"data","diff":false,"payload":{"title":"Why my build timed out","playing":true}}"#
+    guard case .snapshot(let snapshot?) = AdapterLine.parse(line) else {
+        Issue.record("ожидался снимок, а не осечка")
+        return
+    }
+    #expect(snapshot.title == "Why my build timed out")
+}
 ```
 
 - [ ] **Step 2: Запустить тесты и убедиться, что они падают**
@@ -295,7 +314,11 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
     /// Накладывает дифф на имеющийся снимок. Возвращает nil, если снимка ещё
     /// не было: дифф сам по себе не описывает трек целиком.
     public func applied(to base: NowPlayingSnapshot?) -> NowPlayingSnapshot? {
-        guard var snapshot = base else { return asSnapshot() }
+        // Без базы возвращаем именно nil, а не сочинённый снимок: дифф вроде
+        // {"playing":true} описал бы «играет неизвестно что» с пустым
+        // названием и нулевой длительностью. На это опирается аккумулятор
+        // из Task 5.
+        guard var snapshot = base else { return nil }
         if let title { snapshot.title = title }
         if let artist { snapshot.artist = artist }
         if let album { snapshot.album = album }
@@ -345,21 +368,30 @@ public enum AdapterLine: Sendable, Equatable {
         let payload: NowPlayingPayload
     }
 
+    /// Известный текст осечки адаптера. Сверяется только с тем, что не
+    /// разобралось как JSON: подстрока «timed out» вполне может встретиться
+    /// в названии трека, и такую строку нельзя терять как сбой канала.
+    private static let adapterTimeoutMessage = "timed out"
+
     public static func parse(_ line: String) -> AdapterLine {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .unrecognized(line) }
+        guard let data = trimmed.data(using: .utf8) else { return .unrecognized(line) }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        // Разбор JSON идёт первым: валидная строка потока — это данные,
+        // что бы ни встретилось внутри её текстовых полей.
+        if let envelope = try? decoder.decode(Envelope.self, from: data) {
+            return envelope.diff ? .diff(envelope.payload) : .snapshot(envelope.payload.asSnapshot())
+        }
 
         // Осечку адаптер печатает открытым текстом, не JSON-ом. Отличать её
         // от мусора важно: супервизор не должен считать это падением канала.
-        if trimmed.contains("timed out") { return .transientFailure(trimmed) }
+        if trimmed.contains(adapterTimeoutMessage) { return .transientFailure(trimmed) }
 
-        guard let data = trimmed.data(using: .utf8) else { return .unrecognized(line) }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let envelope = try? decoder.decode(Envelope.self, from: data) else {
-            return .unrecognized(line)
-        }
-        return envelope.diff ? .diff(envelope.payload) : .snapshot(envelope.payload.asSnapshot())
+        return .unrecognized(line)
     }
 }
 ```
@@ -371,12 +403,12 @@ public enum AdapterLine: Sendable, Equatable {
 - [ ] **Step 5: Запустить тесты и убедиться, что они проходят**
 
 Run: `swift test --package-path Packages/NotchKit --filter AdapterLineTests`
-Expected: PASS, 7 тестов
+Expected: PASS, 9 тестов
 
 - [ ] **Step 6: Прогнать полный пакет и закоммитить**
 
 Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS, 41 тест (34 фундамента + 7 новых)
+Expected: PASS, 43 теста (34 фундамента + 9 новых)
 
 ```bash
 git add Packages/NotchKit
@@ -737,14 +769,31 @@ public actor AdapterProcess {
 
     /// Разовая команда управления. Отдельный короткоживущий процесс —
     /// у `stream` нет входного канала для команд.
+    ///
+    /// Ожидание асинхронное, а не через `waitUntilExit()`: синхронное
+    /// ожидание заняло бы поток актора на всё время жизни подпроцесса,
+    /// и `stop()` супервизора встал бы за ним в очередь, съедая бюджет
+    /// «меньше секунды на завершение».
     public func send(code: Int32) async throws {
         let process = Process()
         process.executableURL = paths.perl
         process.arguments = [paths.script.path, paths.framework.path, "send", String(code)]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            // Резолвится ровно один раз: либо отсюда после завершения
+            // процесса, либо из catch ниже, если он не смог запуститься —
+            // тогда terminationHandler системой не вызывается. Обработчик
+            // ставится ДО run(), иначе мгновенно завершившийся процесс
+            // успел бы отработать раньше, чем его есть кому услышать.
+            process.terminationHandler = { _ in continuation.resume() }
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
     }
 
     /// Останавливает поток. SIGINT, а не SIGKILL: спайк подтвердил, что
@@ -790,31 +839,43 @@ import Testing
 import Foundation
 @testable import MediaBridge
 
-/// Корень репозитория относительно файла теста.
+/// Корень репозитория относительно файла теста. Пять вызовов, а не четыре:
+/// первый снимает имя файла, остальные четыре — каталоги
+/// MediaBridgeTests, Tests, NotchKit, Packages.
 private var repoRoot: URL {
     URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()  // MediaBridgeTests
-        .deletingLastPathComponent()  // Tests
-        .deletingLastPathComponent()  // NotchKit
-        .deletingLastPathComponent()  // Packages
+        .deletingLastPathComponent()  // имя файла -> MediaBridgeTests
+        .deletingLastPathComponent()  // MediaBridgeTests -> Tests
+        .deletingLastPathComponent()  // Tests -> NotchKit
+        .deletingLastPathComponent()  // NotchKit -> Packages
+        .deletingLastPathComponent()  // Packages -> корень репозитория
+}
+
+/// Вынесено, чтобы условие трейта и тело теста не разошлись в том,
+/// что считают путём к адаптеру.
+private var adapterPaths: AdapterPaths {
+    AdapterPaths.vendored(repoRoot: repoRoot)
 }
 
 @Test("пути к вендоренному адаптеру абсолютны")
 func vendoredPathsAreAbsolute() {
-    let paths = AdapterPaths.vendored(repoRoot: repoRoot)
+    let paths = adapterPaths
     #expect(paths.script.path.hasPrefix("/"))
     #expect(paths.framework.path.hasPrefix("/"))
     #expect(paths.perl.path == "/usr/bin/perl")
 }
 
-/// Требует собранного фреймворка. Пропускается, если его нет: собирать
-/// адаптер ради теста незачем, а на машине разработчика он уже есть.
-@Test("поток адаптера отдаёт хотя бы одну разобранную строку")
+/// Требует собранного фреймворка. Пропуск делается трейтом `.enabled(if:)`,
+/// а НЕ провалом `#require` в теле: условие трейта вычисляется до тела, и
+/// Swift Testing помечает тест как skipped. Провалившийся `#require` — это
+/// всегда упавший тест, и сообщение «пропущен» в нём только вводит
+/// в заблуждение того, кто увидит красный прогон.
+@Test(
+    "поток адаптера отдаёт хотя бы одну разобранную строку",
+    .enabled(if: adapterPaths.existsOnDisk, "адаптер не собран, тест пропущен")
+)
 func streamYieldsParsedLine() async throws {
-    let paths = AdapterPaths.vendored(repoRoot: repoRoot)
-    try #require(paths.existsOnDisk, "адаптер не собран, тест пропущен")
-
-    let adapter = AdapterProcess(paths: paths)
+    let adapter = AdapterProcess(paths: adapterPaths)
     var received: AdapterLine?
     for await line in await adapter.lines() {
         received = line
@@ -1096,7 +1157,7 @@ Expected: PASS, 7 тестов
 - [ ] **Step 7: Прогнать полный пакет и закоммитить**
 
 Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS, 59 тестов
+Expected: PASS, 61 тест
 
 ```bash
 git add Packages/NotchKit
@@ -1499,7 +1560,7 @@ open build/Build/Products/Debug/Notchka.app
 - [ ] **Step 7: Прогнать тесты и закоммитить**
 
 Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS, 70 тестов (34 фундамента + 25 MediaBridge + 11 NotchUI)
+Expected: PASS, 72 теста (34 фундамента + 27 MediaBridge + 11 NotchUI)
 
 ```bash
 pkill -x Notchka
@@ -1920,7 +1981,7 @@ if case .expanded = controller.state { musicModel.refreshPosition() }
 - [ ] **Step 8: Прогнать тесты и закоммитить**
 
 Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS, 75 тестов
+Expected: PASS, 77 тестов
 
 ```bash
 pkill -x Notchka
@@ -2048,7 +2109,7 @@ extension NotchGeometry {
 - [ ] **Step 7: Прогнать тесты и закоммитить**
 
 Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS, 78 тестов
+Expected: PASS, 80 тестов
 
 ```bash
 pkill -x Notchka
@@ -2066,7 +2127,7 @@ git commit -m "feat: удержание панели по её границам 
 - [ ] **Step 1: Прогнать все тесты**
 
 Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS, 78 тестов (34 фундамента + 25 MediaBridge + 19 NotchUI)
+Expected: PASS, 80 тестов (34 фундамента + 27 MediaBridge + 16 NotchUI + 3 NotchCore)
 
 - [ ] **Step 2: Собрать релизную конфигурацию**
 
