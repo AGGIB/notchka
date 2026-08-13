@@ -102,10 +102,12 @@ func snippetUpdateRefreshesSearchIndex() throws {
     let indexed = try database.queue.read { db in
         try String.fetchOne(
             db,
-            sql: "SELECT body FROM search_index WHERE owner_kind = 'snippet' AND owner_id = ?",
+            sql: "SELECT title FROM search_index WHERE owner_kind = 'snippet' AND owner_id = ?",
             arguments: [pin.id]
         )
     }
+    // Метка живёт в title, значение — в body: так же, как у истории буфера,
+    // где title это имя приложения-источника.
     #expect(indexed == "новая метка")
 }
 
@@ -126,7 +128,7 @@ func deleteRemovesSnippetAndIndexRow() throws {
     let indexedBeforeDelete = try database.queue.read { db in
         try Int.fetchOne(
             db,
-            sql: "SELECT COUNT(*) FROM search_index WHERE owner_kind = 'snippet' AND body = ?",
+            sql: "SELECT COUNT(*) FROM search_index WHERE owner_kind = 'snippet' AND title = ?",
             arguments: ["удалить"]
         ) ?? 0
     }
@@ -144,25 +146,52 @@ func deleteRemovesSnippetAndIndexRow() throws {
     #expect(indexedAfterDelete == 0)
 }
 
-/// Значение не индексируется и для нечувствительных пинов — правило одно
-/// для всех, без ветвления по isSensitive в месте записи индекса (см.
-/// комментарий в SnippetsRepository.add). Без этого теста регрессия вида
-/// «для нечувствительных давай проиндексируем value ради удобства поиска»
-/// прошла бы незамеченной: единственная проверка из брифа покрывает
-/// только isSensitive: true.
-@Test("значение не индексируется и когда пин не чувствительный")
-func nonSensitiveValueIsNotIndexedEither() throws {
+/// Обратная сторона теста выше: скрывается именно секрет, а не значение
+/// как класс.
+///
+/// Изначально здесь стояла проверка, требовавшая не индексировать значения
+/// вовсе, ни для каких пинов. Правило проще и безопаснее на вид, но платой
+/// за него была бы почти полная непоисковость пинов: почту и телефон
+/// человек ищет по самому номеру не реже, чем по подписи, — то есть защита
+/// оплачивалась бы той самой функцией, ради которой пины и заведены.
+@Test("значение нечувствительного пина индексируется и находится")
+func nonSensitiveValueIsIndexed() throws {
     let database = try NotchDatabase(location: .temporary())
     try database.migrate()
     let repository = SnippetsRepository(database: database)
     try repository.add(label: "Телефон", value: "открытоезначение",
                        icon: nil, colorHex: nil, isSensitive: false, at: t0)
 
-    let leaked = try database.queue.read { db in
+    let indexed = try database.queue.read { db in
         try Int.fetchOne(
             db,
             sql: "SELECT COUNT(*) FROM search_index WHERE body LIKE ?",
             arguments: ["%открытоезначение%"]
+        ) ?? 0
+    }
+    #expect(indexed == 1)
+}
+
+/// Смена признака чувствительности обязана убирать значение из индекса, а
+/// не только менять то, как пин рисуется: иначе пин, помеченный секретным
+/// задним числом, остаётся находимым по своему же значению.
+@Test("пин, ставший чувствительным при правке, уходит из индекса значением")
+func turningSensitiveRemovesValueFromIndex() throws {
+    let database = try NotchDatabase(location: .temporary())
+    try database.migrate()
+    let repository = SnippetsRepository(database: database)
+    try repository.add(label: "ИИН", value: "секретпозже",
+                       icon: nil, colorHex: nil, isSensitive: false, at: t0)
+    var pin = try #require(try repository.all().first)
+
+    pin.isSensitive = true
+    try repository.update(pin, at: t0.addingTimeInterval(60))
+
+    let leaked = try database.queue.read { db in
+        try Int.fetchOne(
+            db,
+            sql: "SELECT COUNT(*) FROM search_index WHERE body LIKE ?",
+            arguments: ["%секретпозже%"]
         ) ?? 0
     }
     #expect(leaked == 0)

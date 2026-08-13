@@ -11,6 +11,16 @@ public struct SnippetsRepository: Sendable {
     // компилятор такое не ловит — только рантайм-несовпадение строк.
     private static let ownerKind = "snippet"
 
+    /// Что из значения пина попадает в поисковый индекс.
+    ///
+    /// Единственное место, где принимается это решение, — чтобы «секрет не
+    /// индексируется» держалось на одной строке, а не на дисциплине в трёх
+    /// местах записи. Пустая строка, а не значение: индекс не шифруется, и
+    /// положить туда секрет значит обойти маскировку через поиск.
+    private static func indexedValue(_ value: String, isSensitive: Bool) -> String {
+        isSensitive ? "" : value
+    }
+
     public init(database: NotchDatabase) {
         self.database = database
     }
@@ -18,11 +28,12 @@ public struct SnippetsRepository: Sendable {
     /// Сохраняет пин в конец списка. После отсечения пробелов пустая метка
     /// не сохраняется — пин без подписи неотличим от соседа.
     ///
-    /// В индекс попадает только метка — значение не индексируется никогда,
-    /// даже когда пин не отмечен чувствительным. Одно правило для всех
-    /// пинов проще и надёжнее, чем ветвиться по `isSensitive` в месте
-    /// записи индекса: цена ошибиться веткой и один раз проиндексировать
-    /// секрет того не стоит.
+    /// Метка идёт в индекс всегда, значение — только у нечувствительного
+    /// пина. Правило «не индексировать значения вовсе» было бы проще, но
+    /// сделало бы пины почти непоисковыми: почту и телефон человек ищет по
+    /// самому номеру не реже, чем по подписи. Скрывать надо секреты, а не
+    /// всё подряд, — иначе защита оплачивается функцией, которая ради этого
+    /// и существует.
     ///
     /// Порядок нового пина — на единицу больше текущего максимума, а не
     /// количество строк: после удалений из середины списка количество
@@ -51,7 +62,7 @@ public struct SnippetsRepository: Sendable {
             guard let id = snippet.id else { return }
             try db.execute(
                 sql: "INSERT INTO search_index (owner_kind, owner_id, title, body) VALUES (?, ?, ?, ?)",
-                arguments: [Self.ownerKind, id, "", trimmed]
+                arguments: [Self.ownerKind, id, trimmed, Self.indexedValue(value, isSensitive: isSensitive)]
             )
         }
     }
@@ -127,8 +138,12 @@ public struct SnippetsRepository: Sendable {
                 ]
             )
             try db.execute(
-                sql: "UPDATE search_index SET body = ? WHERE owner_kind = ? AND owner_id = ?",
-                arguments: [trimmed, Self.ownerKind, id]
+                sql: "UPDATE search_index SET title = ?, body = ? WHERE owner_kind = ? AND owner_id = ?",
+                arguments: [
+                    trimmed,
+                    Self.indexedValue(snippet.value, isSensitive: snippet.isSensitive),
+                    Self.ownerKind, id,
+                ]
             )
         }
     }
