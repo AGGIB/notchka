@@ -501,8 +501,11 @@ private struct NotchRootView: View {
                 track: musicModel.track,
                 position: musicModel.position,
                 artwork: musicModel.artwork,
-                accent: musicModel.accent
-            ) { musicModel.togglePlayback() }
+                accent: musicModel.accent,
+                onPreviousTrack: { musicModel.previousTrack() },
+                onTogglePlayback: { musicModel.togglePlayback() },
+                onNextTrack: { musicModel.nextTrack() }
+            )
         case .clipboard:
             if let clipboardModel {
                 clipboardContent(model: clipboardModel)

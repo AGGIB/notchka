@@ -44,7 +44,9 @@ public struct MusicTabView: View {
     private let position: TimeInterval
     private let artwork: Image?
     private let accent: Color
+    private let onPreviousTrack: () -> Void
     private let onTogglePlayback: () -> Void
+    private let onNextTrack: () -> Void
 
     /// Сторона квадрата обложки. 190 pt подобраны под высоту области
     /// содержимого раскрытой панели так, чтобы обложка занимала её почти
@@ -68,13 +70,17 @@ public struct MusicTabView: View {
         position: TimeInterval,
         artwork: Image?,
         accent: Color,
-        onTogglePlayback: @escaping () -> Void
+        onPreviousTrack: @escaping () -> Void,
+        onTogglePlayback: @escaping () -> Void,
+        onNextTrack: @escaping () -> Void
     ) {
         self.track = track
         self.position = position
         self.artwork = artwork
         self.accent = accent
+        self.onPreviousTrack = onPreviousTrack
         self.onTogglePlayback = onTogglePlayback
+        self.onNextTrack = onNextTrack
     }
 
     public var body: some View {
@@ -169,7 +175,7 @@ public struct MusicTabView: View {
 
     private func playbackControls(_ track: TrackDisplay) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            PlayPauseButton(isPlaying: track.isPlaying, action: onTogglePlayback)
+            transportRow(track)
             ProgressBar(
                 progress: TrackFormatting.progress(position: position, duration: track.duration),
                 accent: accent
@@ -183,18 +189,45 @@ public struct MusicTabView: View {
             .foregroundStyle(.white.opacity(0.45))
         }
     }
+
+    /// Предыдущий / play-pause / следующий в один ряд. Play/pause в центре
+    /// и остаётся главным элементом — крупнее и единственный полностью
+    /// непрозрачный (см. doc PlayPauseButtonStyle); боковые кнопки меньше и
+    /// в покое без заливки, чтобы не спорить за внимание с центральной.
+    ///
+    /// Ширина ряда (24 + 12 + 30 + 12 + 24 = 102 pt) далеко внутри бюджета,
+    /// который PanelMetricsTests.playerKeepsUsableWidth проверяет для всей
+    /// колонки плеера (> 200 pt) — сама раскладка колонки (PanelMetrics,
+    /// artworkSize) этим рядом не тронута.
+    private func transportRow(_ track: TrackDisplay) -> some View {
+        HStack(spacing: 12) {
+            TrackSkipButton(systemName: "backward.fill", label: "Предыдущий трек", action: onPreviousTrack)
+            PlayPauseButton(isPlaying: track.isPlaying, action: onTogglePlayback)
+            TrackSkipButton(systemName: "forward.fill", label: "Следующий трек", action: onNextTrack)
+        }
+    }
 }
 
-/// Play/pause — единственный элемент управления воспроизведением.
+/// Play/pause — главный из трёх элементов ряда управления воспроизведением
+/// (см. transportRow(_:) выше). По бокам — TrackSkipButton ниже, для
+/// «предыдущий»/«следующий»; эта кнопка крупнее их и единственная в ряду
+/// нарисована полностью непрозрачным кругом (см. doc PlayPauseButtonStyle).
 ///
-/// Кнопок «предыдущий»/«следующий» трек здесь нет — не скрыты, не
-/// задизейблены, убраны совсем. Они рисовали backward.fill/forward.fill, но
-/// обе слали тот же toggle-код, что и эта кнопка: переключение треков
-/// спайком не проверялось эмпирически, точных кодов нет. Задизейбленная
-/// кнопка не лучше — она всё равно обещает своим видом «пролистывание
-/// треков», которого на самом деле нет, а нажатие на toggle во время
-/// воспроизведения по факту ОСТАНАВЛИВАЕТ музыку: путать этим пользователя
-/// на ежедневном инструменте хуже, чем временно недосчитаться двух кнопок.
+/// История этой вьюхи — причина, по которой в проекте вообще действует
+/// правило «код команды проверяется эмпирически, а не берётся из заголовка
+/// фреймворка». Раньше кнопки перемотки уже стояли в интерфейсе рядом с
+/// этой и рисовали backward.fill/forward.fill, но обе слали тот же
+/// toggle-код, что и play/pause: коды переключения треков никто не проверял
+/// на практике, их взяли из головы. Нажатие «следующий трек» на деле
+/// ОСТАНАВЛИВАЛО музыку — интерфейс обещал одно, код делал другое. Кнопки
+/// тогда убрали совсем, а не задизейблили: задизейбленная кнопка обманывала
+/// бы тем же обещанием пролистывания без результата, только тише.
+///
+/// Коды next/previous с тех пор подтверждены эмпирически — командами,
+/// реально отправленными играющему треку, с проверкой, что трек сменился в
+/// нужную сторону, а не предположением по документации (см. doc
+/// MediaCommand) — и кнопки вернулись. Это не повтор прежней ошибки именно
+/// потому, что на этот раз коды проверены, а не угаданы.
 ///
 /// Отдельная вьюха, а не функция внутри MusicTabView: нужен @State для
 /// наведения курсора — свойство хранится, только когда есть стабильная
@@ -230,6 +263,48 @@ private struct PlayPauseButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(Circle().fill(.white.opacity(isHovering ? 1 : 0.85)))
+            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+    }
+}
+
+/// «Предыдущий»/«следующий» трек — младшие элементы ряда, поэтому глифом
+/// служит белый разной прозрачности (правило «Обсидиана»), а не заливка:
+/// PlayPauseButtonStyle выше сознательно единственный полностью непрозрачный
+/// элемент вкладки, и вторая такая кнопка нарушила бы это «единственный».
+///
+/// Тот же приём и то же обоснование, что у PlayPauseButton: отдельная
+/// вьюха, а не функция, ради стабильной идентичности под @State наведения.
+private struct TrackSkipButton: View {
+    let systemName: String
+    let label: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+    private static let diameter: CGFloat = 24
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(isHovering ? 1 : 0.7))
+                .frame(width: Self.diameter, height: Self.diameter)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(TrackSkipButtonStyle(isHovering: isHovering))
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(label)
+    }
+}
+
+/// Наведение — едва заметный белый круг (0.14, не 1 как у play/pause: это
+/// не главная кнопка ряда), нажатие — то же уменьшение масштаба, что и у
+/// PlayPauseButtonStyle, языком той же кнопки, а не изобретённое заново.
+private struct TrackSkipButtonStyle: ButtonStyle {
+    let isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(Circle().fill(.white.opacity(isHovering ? 0.14 : 0)))
             .scaleEffect(configuration.isPressed ? 0.9 : 1)
     }
 }

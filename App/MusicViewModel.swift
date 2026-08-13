@@ -110,17 +110,40 @@ final class MusicViewModel {
         }
     }
 
-    /// Разворачивает/приостанавливает воспроизведение — единственная
-    /// команда, которой сейчас управляет UI.
+    /// Разворачивает/приостанавливает воспроизведение.
     ///
-    /// Раньше здесь принимался TrackControl (previous/playPause/next):
-    /// обе стрелки перемотки слали тот же код toggle, что и play/pause,
-    /// потому что спайк коды переключения треков эмпирически не проверял.
-    /// Кнопки перемотки убраны из MusicTabView (см. doc у playPauseButton
-    /// там) вместе с типом TrackControl — раз других команд не осталось,
-    /// в enum и switch по нему тоже нет нужды.
+    /// Раньше это была единственная команда, которой управлял UI, и здесь
+    /// же объяснялось, почему для неё нет типа TrackControl: кнопки
+    /// перемотки были убраны из MusicTabView (см. тогдашний doc у
+    /// playPauseButton там) вместе с TrackControl (previous/playPause/next)
+    /// — обе стрелки слали тот же код toggle, что и play/pause, потому что
+    /// спайк коды переключения треков эмпирически не проверял, а раз других
+    /// команд не осталось, в enum и switch по нему тоже не было нужды.
+    ///
+    /// Коды next/previous с тех пор подтверждены отдельно (см. doc
+    /// MediaCommand), кнопки вернулись — см. nextTrack()/previousTrack()
+    /// ниже. TrackControl намеренно не восстановлен: с тремя командами он
+    /// был бы просто вторым именем для того же набора значений, что уже
+    /// есть в MediaCommand, без собственной семантики поверх него — UI и
+    /// так вызывает три разных метода на три разных нажатия, оборачивать их
+    /// в четвёртый enum, который тут же разбирается обратно switch'ем на те
+    /// же три MediaCommand, нечего.
     func togglePlayback() {
         Task { try? await provider.send(.toggle) }
+    }
+
+    /// Следующий трек. Код — см. MediaCommand.next.adapterCode; там же doc
+    /// о том, как и кем он подтверждён (не тем же спайком, что play/pause/
+    /// toggle).
+    func nextTrack() {
+        Task { try? await provider.send(.next) }
+    }
+
+    /// Предыдущий трек. Код — см. MediaCommand.previous.adapterCode; там же
+    /// doc о том, как и кем он подтверждён (не тем же спайком, что
+    /// play/pause/toggle).
+    func previousTrack() {
+        Task { try? await provider.send(.previous) }
     }
 
     private func apply(_ snapshot: NowPlayingSnapshot?) {

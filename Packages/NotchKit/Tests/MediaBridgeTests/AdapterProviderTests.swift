@@ -23,11 +23,16 @@ private let pausedBase = NowPlayingSnapshot(
 /// является предметом теста.
 private let now = Date(timeIntervalSince1970: 2_000_000)
 
-@Test("коды команд совпадают с проверенными спайком")
+@Test("коды команд совпадают с проверенными эмпирически")
 func commandCodesMatchSpike() {
     #expect(MediaCommand.play.adapterCode == 0)
     #expect(MediaCommand.pause.adapterCode == 1)
     #expect(MediaCommand.toggle.adapterCode == 2)
+    // next/previous проверены отдельно от исходного спайка — владельцем,
+    // вручную, на живой системе (см. doc MediaCommand): реальная смена
+    // трека на живом YouTube в Safari, а не документация или заголовок.
+    #expect(MediaCommand.next.adapterCode == 4)
+    #expect(MediaCommand.previous.adapterCode == 5)
 }
 
 @Test("снимок заменяет состояние целиком")
