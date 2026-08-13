@@ -466,47 +466,50 @@ private struct NotchRootView: View {
             ) { musicModel.togglePlayback() }
         case .clipboard:
             if let clipboardModel {
-                // Ветвление вынесено в чистую функцию (ClipboardTabContent
-                // .resolve, NotchUI) — здесь только читаем её результат, сам
-                // выбор проверен тестом без окна (см. PermissionPromptViewTests).
-                switch ClipboardTabContent.resolve(isAccessibilityTrusted: isAccessibilityTrusted) {
-                case .ribbon:
-                    ClipboardTabView(
-                        cards: clipboardModel.cards,
-                        selected: clipboardModel.selectedID,
-                        accent: musicModel.accent,
-                        onActivate: { id in
-                            // frontmostApplicationBeforeExpanding, а не
-                            // NSWorkspace.frontmostApplication здесь и сейчас:
-                            // фокус к моменту клика уже у самой Notchka (решение
-                            // №3 постановки).
-                            clipboardModel.activate(
-                                id: id, frontmostApplication: controller.frontmostApplicationBeforeExpanding
-                            )
-                        },
-                        onCopyOnly: { id in clipboardModel.copyOnly(id: id) }
-                    )
-                case .permissionPrompt:
-                    PermissionPromptView(
-                        onRequestPermission: {
-                            // Системный диалог — только по этому явному нажатию,
-                            // никогда сам по себе при запуске или раскрытии
-                            // панели (решение №2 постановки задачи 10). Присваиваем
-                            // возвращаемое значение сразу: оно почти всегда false
-                            // (диалог только что появился, пользователь ещё не
-                            // ответил), но если разрешение уже было выдано другим
-                            // путём и опрос ниже до этого не дошёл — не заставляем
-                            // ждать лишний тик.
-                            isAccessibilityTrusted = AccessibilityPermission.requestIfNeeded()
-                        },
-                        onOpenSettings: AccessibilityPermission.openSettings
-                    )
-                }
+                clipboardContent(model: clipboardModel)
             } else {
                 TabPlaceholderView(tab: tab)
             }
         case .notes, .pins:
             TabPlaceholderView(tab: tab)
+        }
+    }
+
+    /// Лента или объяснение про разрешение — что из двух, решает чистая
+    /// функция ClipboardTabContent.resolve в NotchUI: здесь только читаем её
+    /// результат, а сам выбор проверен тестом без окна (см.
+    /// PermissionPromptViewTests).
+    @ViewBuilder
+    private func clipboardContent(model: ClipboardViewModel) -> some View {
+        switch ClipboardTabContent.resolve(isAccessibilityTrusted: isAccessibilityTrusted) {
+        case .ribbon:
+            ClipboardTabView(
+                cards: model.cards,
+                selected: model.selectedID,
+                accent: musicModel.accent,
+                onActivate: { id in
+                    // frontmostApplicationBeforeExpanding, а не
+                    // NSWorkspace.frontmostApplication здесь и сейчас: фокус к
+                    // моменту клика уже у самой Notchka.
+                    model.activate(
+                        id: id, frontmostApplication: controller.frontmostApplicationBeforeExpanding
+                    )
+                },
+                onCopyOnly: { id in model.copyOnly(id: id) }
+            )
+        case .permissionPrompt:
+            PermissionPromptView(
+                onRequestPermission: {
+                    // Системный диалог — только по этому явному нажатию,
+                    // никогда сам по себе при запуске или раскрытии панели.
+                    // Возвращаемое значение присваиваем сразу: оно почти
+                    // всегда false (диалог только появился, пользователь ещё
+                    // не ответил), но если разрешение уже было выдано другим
+                    // путём — не заставляем ждать лишний тик опроса.
+                    isAccessibilityTrusted = AccessibilityPermission.requestIfNeeded()
+                },
+                onOpenSettings: AccessibilityPermission.openSettings
+            )
         }
     }
 }
