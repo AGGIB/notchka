@@ -12,6 +12,12 @@ import NotchUI
 @Observable
 final class NotchController {
     private(set) var state: NotchState = .closed
+    /// Приложение, бывшее фронтовым непосредственно перед разворотом панели —
+    /// до того, как она получит право стать key-окном и разворот заберёт
+    /// фокус себе (см. handle(_:)). Понадобится вставке из истории буфера
+    /// (Task 9): без этого захвата вставлять было бы уже некуда — фронтовым
+    /// к этому моменту стала бы сама Notchka.
+    private(set) var frontmostApplicationBeforeExpanding: NSRunningApplication?
 
     @ObservationIgnored private var machine = NotchStateMachine()
     @ObservationIgnored private var debouncer = HoverDebouncer()
@@ -71,9 +77,29 @@ final class NotchController {
     }
 
     func handle(_ event: NotchEvent) {
-        guard machine.handle(event) != nil else { return }
-        state = machine.state
+        let wasExpanded = isExpanded(state)
+        guard let newState = machine.handle(event) else { return }
+
+        // Заход в .expanded из .closed/.peek — последний момент, когда
+        // фронтовым ещё гарантированно остаётся чужое приложение: ниже
+        // syncMouseHandling() включит panel.acceptsKeyboard и отдаст панели
+        // право стать key-окном, после чего фронтовым будет уже сама
+        // Notchka. Сверяемся именно с предыдущим состоянием, а не только с
+        // новым, — иначе смена вкладки внутри уже открытой панели
+        // (selectTab, cycleTab: оба .expanded → .expanded) перезаписала бы
+        // захваченное приложение на саму Notchka.
+        if isExpanded(newState), !wasExpanded {
+            frontmostApplicationBeforeExpanding = NSWorkspace.shared.frontmostApplication
+        }
+
+        state = newState
         syncMouseHandling()
+    }
+
+    /// true для любой вкладки .expanded — конкретная вкладка тут не важна.
+    private func isExpanded(_ state: NotchState) -> Bool {
+        if case .expanded = state { return true }
+        return false
     }
 
     private func cursorSampled(at location: CGPoint, now: Date) {
