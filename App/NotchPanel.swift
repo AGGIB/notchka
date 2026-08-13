@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import NotchCore
 
 /// Окно панели. Размер постоянен и равен максимальному развороту:
 /// менять фрейм NSWindow во время пружины — значит получить рывки,
@@ -9,6 +10,12 @@ final class NotchPanel: NSPanel {
     /// разворота с полем поиска, иначе панель отобрала бы фокус
     /// у приложения, куда мы собираемся вставлять текст.
     var acceptsKeyboard = false
+
+    /// Куда уходит разобранное нажатие клавиши из keyDown(with:). Подключается
+    /// снаружи (см. NotchController.start()) замыканием, а не хранением самого
+    /// контроллера: у NotchController уже есть `weak var panel` в обратную
+    /// сторону, и сильная ссылка здесь замкнула бы цикл удержания.
+    var onKeyEvent: ((NotchEvent) -> Void)?
 
     override var canBecomeKey: Bool { acceptsKeyboard }
     override var canBecomeMain: Bool { false }
@@ -38,11 +45,28 @@ final class NotchPanel: NSPanel {
         isMovableByWindowBackground = false
         hidesOnDeactivate = false
         // По умолчанию окно прозрачно для мыши, иначе оно перехватит
-        // клики по меню-бару. Включается в Task 8, когда курсор входит в зону.
+        // клики по меню-бару. Дальше переключается NotchController
+        // .syncMouseHandling() по текущему состоянию панели.
         ignoresMouseEvents = true
 
         let hosting = NSHostingView(rootView: rootView)
         hosting.frame = CGRect(origin: .zero, size: contentRect.size)
         contentView = hosting
+    }
+
+    /// Долетает сюда только пока панель — key-окно, то есть только в
+    /// .expanded (acceptsKeyboard управляется NotchController
+    /// .syncMouseHandling()), поэтому отдельная проверка состояния внутри
+    /// не нужна. Нераспознанная раскладкой клавиша обязана уйти дальше по
+    /// цепочке ответчиков через super — иначе поле поиска (следующий план)
+    /// не получило бы ни одного печатного символа.
+    override func keyDown(with event: NSEvent) {
+        let key = PanelKeyHandler.panelKey(for: event)
+        let modifiers = PanelKeyHandler.panelModifiers(for: event)
+        guard let notchEvent = KeyBinding.event(forKeyCode: key, modifiers: modifiers) else {
+            super.keyDown(with: event)
+            return
+        }
+        onKeyEvent?(notchEvent)
     }
 }

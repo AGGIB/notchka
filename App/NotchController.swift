@@ -48,6 +48,14 @@ final class NotchController {
         hotkey.register { [weak self] in
             self?.handle(.hotkey)
         }
+        // Раскрытая панель отдаёт сюда уже разобранные нажатия (см.
+        // NotchPanel.keyDown(with:)). Замыкание, а не сохранение self в
+        // самой панели — у панели и так есть путь к контроллеру, а обратная
+        // сильная ссылка вместе с private weak var panel выше замкнула бы
+        // цикл удержания.
+        panel?.onKeyEvent = { [weak self] event in
+            self?.handle(event)
+        }
     }
 
     /// Останавливает источники событий. Существует отдельно от deinit, потому
