@@ -95,14 +95,17 @@ public actor AdapterProvider: NowPlayingProvider {
     /// придёт, ляжет поверх старой базы накопителя, а не поверх того, что
     /// вернул этот refresh), но чинить это не входит в задачу: сам дефект
     /// в том, что для интерцепции продолжения диффов и не бывает.
-    public func refresh() async -> NowPlayingSnapshot? {
+    public func refresh() async throws -> NowPlayingSnapshot? {
         let adapter = process ?? AdapterProcess(paths: paths)
         process = adapter
         do {
             return try await adapter.get()
         } catch {
+            // Логируем и бросаем дальше, а не гасим в nil: nil означал бы
+            // «ничего не играет», и панель очистилась бы у пользователя,
+            // у которого музыка идёт.
             logger.error("не удалось выполнить пересинхронизацию get: \(error.localizedDescription, privacy: .public)")
-            return nil
+            throw error
         }
     }
 
