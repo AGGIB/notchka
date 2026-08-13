@@ -12,9 +12,14 @@ import os
 /// потоке, а не заводит себе отдельную очередь. Если поллер решил, что пора
 /// читать, само чтение `NSPasteboard` тоже происходит здесь же, на главном
 /// потоке (см. `PasteboardReader`) — а вот дальше, начиная с фильтра
-/// приватности и заканчивая хешированием, записью блоба и вставкой в базу,
-/// работа уходит в фоновую задачу с приоритетом `.utility`: скопированный
+/// приватности и заканчивая чтением файла, хешированием, записью блоба и
+/// вставкой в базу, работа уходит с главного потока: скопированный
 /// мегабайтный скриншот не должен подвешивать панель.
+///
+/// Уводит её именно `await` на `nonisolated async`-функции, а не сам по себе
+/// `Task(priority: .utility)`: задача, созданная внутри метода этого класса,
+/// наследует его MainActor, и приоритет на исполнителя не влияет. Тонкость
+/// неочевидная — на ней в этой ветке спотыкались трижды.
 @MainActor
 final class ClipboardService {
     private let repository: ClipboardRepository
@@ -25,8 +30,8 @@ final class ClipboardService {
     private var pruneTimer: Timer?
 
     // nonisolated: без этого статический logger унаследовал бы MainActor-
-    // изоляцию класса и был бы недоступен из store()/pruneHistory() — обе
-    // сознательно уводят работу с главного потока (см. их doc-комментарии).
+    // изоляцию класса и был бы недоступен из store()/prune()/readFile() —
+    // все три исполняются вне главного потока (см. их doc-комментарии).
     // Logger — Sendable, значение неизменно, гонки исключены.
     nonisolated private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "ClipboardService")
 
@@ -81,45 +86,60 @@ final class ClipboardService {
         MainActor.assumeIsolated { stop() }
     }
 
-    /// Один тик опроса. Целиком на главном потоке до момента передачи уже
-    /// прочитанного содержимого в фоновую задачу — дальше в `store` этот
-    /// поток не заходит.
+    /// Помечает текущее содержимое пастборда как своё.
+    ///
+    /// Зовётся после того, как приложение само что-то туда положило — когда
+    /// пользователь достаёт запись из истории. Иначе опрос через доли секунды
+    /// прочитает собственную запись обратно (см. `PasteboardPoller.ignore`).
+    func ignoreOwnPasteboardWrite() {
+        poller.ignore(changeCount: NSPasteboard.general.changeCount)
+    }
+
+    /// Один тик опроса. На главном потоке остаётся ровно то, что обязано:
+    /// чтение пастборда и разрешение имени приложения-источника — и то и
+    /// другое AppKit. Всё остальное уходит в `store`.
     private func tick() {
         let changeCount = NSPasteboard.general.changeCount
         guard poller.shouldRead(changeCount: changeCount, idleSeconds: Self.idleSeconds()) else { return }
         guard let content = PasteboardReader.read() else { return }
 
-        // Захват в локальные let, а не через self: замыкание ниже не должно
-        // унаследовать MainActor-изоляцию через self, иначе Task(priority:)
-        // выполнился бы на главном потоке — ровно там, где тяжёлой работе не
-        // место.
+        // Имя приложения разрешается здесь, а не в store: NSWorkspace и
+        // FileManager.displayName — тоже AppKit, и звать их с чужого потока
+        // значило бы обменять один дефект на другой.
+        let source = content.snapshot.sourceBundleID.map { bundleID in
+            (bundleID: bundleID, appName: PasteboardReader.appName(for: bundleID) ?? bundleID)
+        }
+
         let repository = repository
         let privacyFilter = privacyFilter
         Task(priority: .utility) {
-            Self.store(content: content, repository: repository, privacyFilter: privacyFilter)
+            await Self.store(
+                content: content, source: source,
+                repository: repository, privacyFilter: privacyFilter
+            )
         }
     }
 
-    /// Фильтр приватности, хеширование, запись блоба и вставка в базу — вне
-    /// главного потока.
+    /// Фильтр приватности, чтение файла, хеширование, запись блоба и вставка
+    /// в базу — вне главного потока.
     ///
-    /// `nonisolated`: без этого статический метод @MainActor-класса унаследовал
-    /// бы его изоляцию, и Task(priority: .utility) в tick() выше не увёл бы
-    /// работу с главного потока.
+    /// `nonisolated` **и** `async` — обязательно оба. Одного `nonisolated`
+    /// мало: `Task {}`, созданный внутри метода @MainActor-класса, наследует
+    /// его изоляцию, и синхронный вызов из него так и остаётся на главном
+    /// потоке. Уводит с актора именно `await` на функции, не привязанной к
+    /// нему. Ровно на этом уже споткнулись дважды в этой же ветке — в
+    /// PasteboardReader и в ClipboardViewModel.writeTemporaryFile.
     ///
     /// Порядок обязателен: `shouldCapture` проверяется первым, и только при
     /// положительном ответе что-либо попадает в репозиторий — ни одна ветка
     /// ниже не пишет в базу раньше фильтра.
     nonisolated private static func store(
         content: PasteboardReader.Content,
+        source: (bundleID: String, appName: String)?,
         repository: ClipboardRepository,
         privacyFilter: PrivacyFilter
-    ) {
+    ) async {
         guard privacyFilter.shouldCapture(content.snapshot) else { return }
-
-        let source = content.snapshot.sourceBundleID.map { bundleID in
-            (bundleID: bundleID, appName: PasteboardReader.appName(for: bundleID) ?? bundleID)
-        }
 
         do {
             // Порядок ветвей — как в PasteboardReader.read(): файл раньше
@@ -132,7 +152,7 @@ final class ClipboardService {
                 // диска остановило бы весь цикл событий вместе с отрисовкой
                 // панели. Здесь же это после фильтра — на отвергнутое
                 // содержимое ввод-вывод не тратится вовсе.
-                guard let fileData = try? Data(contentsOf: fileURL) else {
+                guard let fileData = try? await Self.readFile(at: fileURL) else {
                     // Между опросом и этим моментом файл могли переместить или
                     // удалить. Не повод для тревоги, но и не повод молчать:
                     // иначе пропажа записи в истории ничем не объяснима.
@@ -152,18 +172,32 @@ final class ClipboardService {
         }
     }
 
+    /// Чтение файла отдельной `async`-функцией, а не выражением по месту:
+    /// внутри уже асинхронной `store` обычный вызов вернулся бы на её
+    /// исполнителя, а нужен именно уход с актора вызывающего.
+    nonisolated private static func readFile(at url: URL) async throws -> Data {
+        try Data(contentsOf: url)
+    }
+
     /// Приводит историю к пределам `RetentionPolicy.default`. Тоже вне
-    /// главного потока: `prune` читает и, при срабатывании предела, удаляет
-    /// записи по всей таблице — не тот объём работы, который стоит делать на
-    /// потоке, рисующем панель.
+    /// главного потока: `prune` читает всю таблицу и, при срабатывании
+    /// предела, удаляет записи по одной отдельными транзакциями, а вместе с
+    /// ними файлы блобов с диска — не тот объём работы, который стоит делать
+    /// на потоке, рисующем панель.
     private func pruneHistory() {
         let repository = repository
         Task(priority: .utility) {
-            do {
-                try repository.prune(policy: .default)
-            } catch {
-                Self.logger.error("чистка истории буфера не удалась: \(error, privacy: .public)")
-            }
+            await Self.prune(repository: repository)
+        }
+    }
+
+    /// `async` по той же причине, что и `store`: без него чистка выполнилась
+    /// бы на главном потоке, потому что породивший её Task унаследовал его.
+    nonisolated private static func prune(repository: ClipboardRepository) async {
+        do {
+            try repository.prune(policy: .default)
+        } catch {
+            logger.error("чистка истории буфера не удалась: \(error, privacy: .public)")
         }
     }
 

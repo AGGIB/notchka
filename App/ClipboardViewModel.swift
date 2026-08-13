@@ -45,8 +45,15 @@ final class ClipboardViewModel {
     /// более длинном тексте.
     private static let previewMaxLength = 64
 
-    init(repository: ClipboardRepository) {
+    /// Зовётся сразу после того, как модель что-то положила в пастборд.
+    /// Через него служба слежения помечает изменение как своё и не читает
+    /// его обратно — иначе достанутая из истории картинка тут же попадала бы
+    /// в неё второй раз, в другом представлении и с другим хешем.
+    @ObservationIgnored private let didWritePasteboard: () -> Void
+
+    init(repository: ClipboardRepository, didWritePasteboard: @escaping () -> Void = {}) {
         self.repository = repository
+        self.didWritePasteboard = didWritePasteboard
     }
 
     /// Перечитывает историю. Вызывать при каждом открытии вкладки — модель
@@ -69,10 +76,13 @@ final class ClipboardViewModel {
     /// этого посылается тот же самый — ему всё равно, что там лежит.
     func activate(id: Int64, frontmostApplication: NSRunningApplication?) {
         guard let item = itemsByID[id] else { return }
-        selectedID = id
         if item.kind == .text {
             PasteService.paste(item.textBody ?? "", into: frontmostApplication)
+            markDelivered(id)
         } else {
+            // Обводка ставится не здесь, а после того, как байты реально
+            // доехали до пастборда: чтение блоба может и не удаться, а
+            // обводка обещает пользователю «вот это сейчас в буфере».
             deliverBlob(item, pastingInto: frontmostApplication)
         }
         touchAndRefresh(id: id)
@@ -81,13 +91,21 @@ final class ClipboardViewModel {
     /// ⌥клик: только копирование, без вставки.
     func copyOnly(id: Int64) {
         guard let item = itemsByID[id] else { return }
-        selectedID = id
         if item.kind == .text {
             PasteService.copyOnly(item.textBody ?? "")
+            markDelivered(id)
         } else {
             deliverBlob(item, pastingInto: nil)
         }
         touchAndRefresh(id: id)
+    }
+
+    /// Отмечает карточку как ту, чьё содержимое сейчас в пастборде, и
+    /// сообщает об этом службе слежения, чтобы она не прочитала нашу же
+    /// запись обратно.
+    private func markDelivered(_ id: Int64) {
+        selectedID = id
+        didWritePasteboard()
     }
 
     /// Поднимает запись наверх ленты в базе и тут же перечитывает историю,
@@ -146,6 +164,8 @@ final class ClipboardViewModel {
         } else {
             PasteService.copyOnly(objects: objects)
         }
+        guard let id = item.id else { return }
+        markDelivered(id)
     }
 
     /// Восстанавливает файл во временном каталоге под исходным именем.

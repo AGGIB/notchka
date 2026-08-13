@@ -12,12 +12,29 @@ import NotchUI
 @Observable
 final class NotchController {
     private(set) var state: NotchState = .closed
-    /// Приложение, бывшее фронтовым непосредственно перед разворотом панели —
-    /// до того, как она получит право стать key-окном и разворот заберёт
-    /// фокус себе (см. handle(_:)). Понадобится вставке из истории буфера
-    /// (Task 9): без этого захвата вставлять было бы уже некуда — фронтовым
-    /// к этому моменту стала бы сама Notchka.
+    /// Приложение, бывшее фронтовым непосредственно перед разворотом панели.
+    ///
+    /// Запасной вариант, а не основной источник: см. `pasteTarget`.
     private(set) var frontmostApplicationBeforeExpanding: NSRunningApplication?
+
+    /// Куда вставлять выбранное из истории.
+    ///
+    /// Спрашиваем систему в момент вставки, а не полагаемся на захват при
+    /// развороте: раскрытая панель не закрывается ни по уходу курсора, ни по
+    /// потере фокуса, так что между разворотом и кликом пользователь успевает
+    /// уйти ⌘Tab в другое приложение. Захваченное тогда указывало бы на то,
+    /// откуда он ушёл, и вставка приезжала бы не туда.
+    ///
+    /// Захват остаётся страховкой ровно на один случай: если фронтовой в этот
+    /// момент — мы сами. Панель `.nonactivatingPanel` у accessory-приложения
+    /// фронтовым его делать не должна, но полагаться на это без живой
+    /// проверки не стоит, а разница между «вставить не туда» и «вставить в
+    /// себя» велика.
+    var pasteTarget: NSRunningApplication? {
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        guard frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier else { return frontmost }
+        return frontmostApplicationBeforeExpanding
+    }
 
     @ObservationIgnored private var machine = NotchStateMachine()
     @ObservationIgnored private var debouncer = HoverDebouncer()
@@ -145,19 +162,31 @@ final class NotchController {
         cursor.setTicking(debouncer.hasPendingTransition)
     }
 
-    /// Прозрачность окна для мыши. Закрытая панель не должна мешать меню-бару.
+    /// Прозрачность окна для мыши и право принимать клавиатуру. Закрытая
+    /// панель не должна мешать меню-бару.
+    ///
+    /// В `.expanded` панель не только получает право стать key-окном, но и
+    /// делается им: `canBecomeKey` — это разрешение, а не действие. Панель
+    /// открывается глобальным хоткеем, который приложение не активирует, и
+    /// без явного `makeKey()` события клавиатуры в неё не приходят вовсе —
+    /// ни ⌘1…⌘4, ни ⇥, ни Esc, пока пользователь не кликнет внутрь. То есть
+    /// клавиатурное управление не работало бы ровно в том сценарии, ради
+    /// которого сделано.
     private func syncMouseHandling() {
         guard let panel else { return }
         switch state {
         case .closed:
             panel.ignoresMouseEvents = true
             panel.acceptsKeyboard = false
+            panel.resignKeyIfNeeded()
         case .peek:
             panel.ignoresMouseEvents = false
             panel.acceptsKeyboard = false
+            panel.resignKeyIfNeeded()
         case .expanded:
             panel.ignoresMouseEvents = false
             panel.acceptsKeyboard = true
+            panel.makeKey()
         }
     }
 }

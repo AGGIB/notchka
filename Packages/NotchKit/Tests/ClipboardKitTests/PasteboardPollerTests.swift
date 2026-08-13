@@ -40,6 +40,15 @@ func returningUserIsReadAgain() {
     #expect(poller.shouldRead(changeCount: 9, idleSeconds: 1) == true)
 }
 
+@Test("помеченное своим изменение не читается")
+func ownChangeIsIgnored() {
+    var poller = PasteboardPoller()
+    poller.ignore(changeCount: 42)
+    #expect(poller.shouldRead(changeCount: 42, idleSeconds: 0) == false)
+    // Следующее, уже чужое, читается как обычно.
+    #expect(poller.shouldRead(changeCount: 43, idleSeconds: 0) == true)
+}
+
 @Test("интервал и порог неактивности совпадают со спекой")
 func constantsMatchSpec() {
     #expect(PasteboardPoller.interval == 0.4)

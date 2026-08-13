@@ -254,7 +254,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // нельзя. Дальше она живёт внутри NotchRootView ровно тот же срок,
         // что и сам контроллер — повторные вызовы refreshNotchScreen() (смена
         // экрана) сюда не доходят, см. ранний return выше.
-        let clipboardModel = clipboardRepository.map(ClipboardViewModel.init(repository:))
+        let clipboardModel = clipboardRepository.map { repository in
+            ClipboardViewModel(repository: repository) { [weak self] in
+                // Служба помечает наше собственное изменение пастборда как
+                // прочитанное. Иначе достанутая из истории картинка через
+                // доли секунды вернётся в неё вторым элементом: с пастборда
+                // она приходит в другом представлении, хеш не совпадает, и
+                // дедупликация её не ловит.
+                self?.clipboardService?.ignoreOwnPasteboardWrite()
+            }
+        }
         panel.contentView = NSHostingView(
             rootView: NotchRootView(
                 controller: controller, notchSize: geometry.notchRect.size,
@@ -468,7 +477,10 @@ private struct NotchRootView: View {
             if let clipboardModel {
                 clipboardContent(model: clipboardModel)
             } else {
-                TabPlaceholderView(tab: tab)
+                // Вкладка готова, но хранилище не открылось (см.
+                // startClipboardService). «Скоро появится» здесь было бы
+                // неправдой о причине.
+                TabPlaceholderView(tab: tab, message: "Хранилище недоступно")
             }
         case .notes, .pins:
             TabPlaceholderView(tab: tab)
@@ -488,12 +500,10 @@ private struct NotchRootView: View {
                 selected: model.selectedID,
                 accent: musicModel.accent,
                 onActivate: { id in
-                    // frontmostApplicationBeforeExpanding, а не
-                    // NSWorkspace.frontmostApplication здесь и сейчас: фокус к
-                    // моменту клика уже у самой Notchka.
-                    model.activate(
-                        id: id, frontmostApplication: controller.frontmostApplicationBeforeExpanding
-                    )
+                    // pasteTarget, а не захваченное при развороте: между
+                    // разворотом и кликом пользователь успевает сменить
+                    // приложение, см. его doc в NotchController.
+                    model.activate(id: id, frontmostApplication: controller.pasteTarget)
                 },
                 onCopyOnly: { id in model.copyOnly(id: id) }
             )

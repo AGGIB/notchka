@@ -20,6 +20,20 @@ final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { acceptsKeyboard }
     override var canBecomeMain: Bool { false }
 
+    /// Отпускает клавиатурный фокус, если он у панели.
+    ///
+    /// Просто снять `acceptsKeyboard` мало: окно, уже ставшее key, таковым и
+    /// остаётся, и продолжало бы забирать нажатия у приложения, в котором
+    /// пользователь работает, после схлопывания панели.
+    func resignKeyIfNeeded() {
+        guard isKeyWindow else { return }
+        resignKey()
+        // Фокус возвращается тому, у кого он был до нас. Без этого клавиатура
+        // осталась бы висеть в воздухе: у accessory-приложения нет других
+        // окон, которым её можно передать.
+        NSApp.deactivate()
+    }
+
     init(contentRect: CGRect, rootView: some View) {
         super.init(
             contentRect: contentRect,

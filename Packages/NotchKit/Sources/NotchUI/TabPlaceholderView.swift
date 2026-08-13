@@ -11,9 +11,15 @@ import NotchCore
 /// `.clipboard` целиком, а не будет подстраиваться под неё.
 public struct TabPlaceholderView: View {
     private let tab: NotchTab
+    private let message: String
 
-    public init(tab: NotchTab) {
+    /// `message` подменяется, когда вкладка пуста не потому, что её ещё не
+    /// написали. У буфера есть такой случай: хранилище не открылось, и
+    /// показывать «скоро появится» о готовой функции значит врать
+    /// пользователю про причину.
+    public init(tab: NotchTab, message: String = "Скоро появится") {
         self.tab = tab
+        self.message = message
     }
 
     public var body: some View {
@@ -24,12 +30,12 @@ public struct TabPlaceholderView: View {
             Text(tab.title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.5))
-            Text("Скоро появится")
+            Text(message)
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.3))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(tab.title). Скоро появится.")
+        .accessibilityLabel("\(tab.title). \(message).")
     }
 }
