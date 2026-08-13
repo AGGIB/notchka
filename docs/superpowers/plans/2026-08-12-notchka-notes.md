@@ -77,8 +77,11 @@ func allTablesExist() throws {
     }
 }
 
-@Test("повторная миграция не ломает существующую базу")
-func migrationIsIdempotent() throws {
+// Имя нарочно не `migrationIsIdempotent`: такая функция уже есть в
+// NotchDatabaseTests того же тест-таргета, и вторая с тем же именем —
+// ошибка повторного объявления, а не два теста.
+@Test("повторная миграция не теряет уже сохранённые строки")
+func migrationPreservesExistingRows() throws {
     let location = StoreLocation.temporary()
     let first = try NotchDatabase(location: location)
     try first.migrate()
@@ -109,11 +112,16 @@ func snippetOrderColumnExists() throws {
     }
 }
 
-@Test("удаление записи не требует ручной чистки индекса на уровне схемы")
+@Test("индекс не связан с таблицами-владельцами внешними ключами")
 func searchIndexIsIndependent() throws {
     let database = try migratedDatabase()
-    // Индекс contentless: он не знает о таблицах-владельцах, и чистка —
-    // ответственность репозиториев, а не внешних ключей.
+    // Индекс не знает о таблицах-владельцах: связь держится парой
+    // (owner_kind, owner_id), внешних ключей нет, и чистка при удалении —
+    // ответственность репозиториев.
+    //
+    // Таблица при этом обычная FTS5, НЕ contentless — план 3 выбрал так
+    // намеренно: из contentless нельзя удалять обычным DELETE ... WHERE,
+    // а именно им чистятся строки. Не «оптимизировать» её обратно.
     try database.queue.read { db in
         #expect(try db.tableExists("search_index"))
     }
@@ -561,6 +569,15 @@ Expected: FAIL — `cannot find 'SearchRepository' in scope`
 внутренних, склеить пробелами и добавить `*` к последнему слову для поиска
 по префиксу.
 
+**Осторожно со словами без букв и цифр.** Ввод вроде `* AND *` даёт слова,
+из которых токенизатор FTS5 не извлекает ни одного токена, и запрос из
+пустых фраз может оказаться синтаксически неверным — то есть ровно тем
+падением, которого мы избегаем. Тест `ftsSyntaxIsEscaped` требует, чтобы
+поиск не бросал ни на одном таком вводе; проверь это прогоном, а не
+рассуждением, и если пустые фразы ломают запрос — отбрасывай слова, не
+дающие токенов, а если после отбрасывания не осталось ничего, возвращай
+`nil`, как на пустом вводе.
+
 ```swift
     /// Превращает свободный ввод в безопасный запрос FTS5.
     ///
@@ -612,28 +629,44 @@ import Testing
 import Foundation
 @testable import NotchUI
 
+/// Календарь с прибитым поясом, а не `.current`.
+///
+/// «Вчера» — календарное понятие, а не «минус 24 часа»: попадёт ли момент
+/// на предыдущий день, зависит от пояса машины. С `.current` тест был бы
+/// зелёным здесь и красным у того, кто запустит его восточнее или западнее,
+/// причём без всякой связи с кодом, который он проверяет.
+private var calendar: Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    return calendar
+}
+
+/// 2027-01-15T08:00:00Z — середина суток по UTC, чтобы сдвиги на несколько
+/// часов в тестах ниже не перескакивали через полночь случайно.
 private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
 @Test("сегодняшняя заметка показывает время")
 func todayShowsTime() {
-    let text = NoteFormatting.relativeDate(now.addingTimeInterval(-3600), now: now)
+    let text = NoteFormatting.relativeDate(now.addingTimeInterval(-3600), now: now, calendar: calendar)
     #expect(text.contains(":"))
 }
 
 @Test("вчерашняя подписана словом")
 func yesterdayIsNamed() {
-    #expect(NoteFormatting.relativeDate(now.addingTimeInterval(-26 * 3600), now: now) == "вчера")
+    let text = NoteFormatting.relativeDate(now.addingTimeInterval(-26 * 3600), now: now, calendar: calendar)
+    #expect(text == "вчера")
 }
 
 @Test("старая показывает дату без времени")
 func olderShowsDate() {
-    let text = NoteFormatting.relativeDate(now.addingTimeInterval(-10 * 24 * 3600), now: now)
+    let text = NoteFormatting.relativeDate(now.addingTimeInterval(-10 * 24 * 3600), now: now, calendar: calendar)
     #expect(text.contains(":") == false)
 }
 
 @Test("будущая дата не ломает форматирование")
 func futureIsSafe() {
-    #expect(NoteFormatting.relativeDate(now.addingTimeInterval(3600), now: now).isEmpty == false)
+    let text = NoteFormatting.relativeDate(now.addingTimeInterval(3600), now: now, calendar: calendar)
+    #expect(text.isEmpty == false)
 }
 ```
 
@@ -643,6 +676,11 @@ Run: `swift test --package-path Packages/NotchKit --filter NoteFormattingTests`
 Expected: FAIL — `cannot find 'NoteFormatting' in scope`
 
 - [ ] **Step 3: Написать вьюху**
+
+`NoteFormatting.relativeDate(_:now:calendar:)` принимает календарь третьим
+параметром со значением по умолчанию `.current`: «вчера» — понятие
+календарное, и без возможности прибить пояс тест зависел бы от того, где
+находится машина, а не от кода.
 
 Поле ввода сверху, `⌘↩` сохраняет, клик по заметке разворачивает
 inline-редактор. Без markdown-рендера — спека §7: редактор размером с ладонь
@@ -996,8 +1034,10 @@ git commit -m "feat: адаптер внутри бандла — приложе
 - [ ] **Step 1: Прогнать все тесты**
 
 Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS. Ожидание: 124 после плана 3 плюс 4 + 6 + 7 + 7 + 4 + 5 + 5 + 4 + 3 = 45,
-итого **169**.
+Expected: PASS. Ожидание: **174** после плана 3 (замерено на слитом master,
+а не оценка из черновика этого плана: план 3 прирос колонкой вкладок,
+бегущей строкой, кнопками перемотки и правками по ревью) плюс
+4 + 6 + 7 + 7 + 4 + 5 + 5 + 4 + 3 = 45, итого **219**.
 
 - [ ] **Step 2: Релизная сборка без предупреждений**
 
