@@ -54,6 +54,29 @@ public final class NotchDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v3-stash") { db in
+            try db.create(table: "notes") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("body", .text).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+
+            try db.create(table: "snippets") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("label", .text).notNull()
+                t.column("value", .text).notNull()
+                t.column("icon", .text)
+                t.column("color_hex", .text)
+                // Порядок задаёт пользователь перетаскиванием; дубли
+                // допустимы и разрешаются стабильной сортировкой по id.
+                t.column("sort_order", .integer).notNull()
+                t.column("is_sensitive", .boolean).notNull().defaults(to: false)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+        }
+
         try migrator.migrate(queue)
     }
 }
