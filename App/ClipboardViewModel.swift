@@ -57,21 +57,23 @@ final class ClipboardViewModel {
         apply(snapshot)
     }
 
-    /// Клик по карточке. Текст вставляется в приложение, бывшее фронтовым до
-    /// разворота панели (frontmostApplication приходит снаружи —
+    /// Клик по карточке: содержимое вставляется в приложение, бывшее
+    /// фронтовым до разворота панели (frontmostApplication приходит снаружи —
     /// NotchController.frontmostApplicationBeforeExpanding захватывает его
-    /// раньше, чем панель заберёт фокус себе). Картинка и файл кладутся в
-    /// общий пастборд: вставить произвольные байты синтетическим ⌘V нечем
-    /// без строки в пастборде, а PasteService умеет работать только со
-    /// строками (см. её интерфейс) — расширять его вне файлов этой задачи
-    /// незачем, поэтому для этих двух типов клик и ⌥клик совпадают.
+    /// раньше, чем панель заберёт фокус себе).
+    ///
+    /// Вставляются все три типа, а не только текст: правило «клик вставляет,
+    /// ⌥клик копирует» оговорок по типу содержимого не имеет, и пользователь,
+    /// кликнувший по скриншоту, не должен гадать, почему в этот раз ничего
+    /// не произошло. Картинка и файл идут в пастборд объектами, но ⌘V после
+    /// этого посылается тот же самый — ему всё равно, что там лежит.
     func activate(id: Int64, frontmostApplication: NSRunningApplication?) {
         guard let item = itemsByID[id] else { return }
         selectedID = id
         if item.kind == .text {
             PasteService.paste(item.textBody ?? "", into: frontmostApplication)
         } else {
-            copyToPasteboard(item)
+            deliverBlob(item, pastingInto: frontmostApplication)
         }
         touchAndRefresh(id: id)
     }
@@ -83,7 +85,7 @@ final class ClipboardViewModel {
         if item.kind == .text {
             PasteService.copyOnly(item.textBody ?? "")
         } else {
-            copyToPasteboard(item)
+            deliverBlob(item, pastingInto: nil)
         }
         touchAndRefresh(id: id)
     }
@@ -100,34 +102,49 @@ final class ClipboardViewModel {
         }
     }
 
-    /// Кладёт байты картинки или файла в общий пастборд. Чтение блоба уходит
-    /// в фоновую задачу тем же приёмом, что и в ClipboardService: скопированный
-    /// скриншот бывает мегабайтным, и синхронное чтение с диска на главном
-    /// потоке подвесило бы панель.
-    private func copyToPasteboard(_ item: ClipboardItem) {
+    /// Достаёт байты картинки или файла и кладёт их в пастборд, а при
+    /// непустом `application` — сразу вставляет.
+    ///
+    /// Всё, что трогает диск — и чтение блоба, и восстановление файла, —
+    /// делается внутри фоновой задачи, до возврата на главный поток.
+    /// Скопированный скриншот бывает мегабайтным, и что чтение, что запись
+    /// таких объёмов на потоке, рисующем панель, её подвешивают.
+    private func deliverBlob(_ item: ClipboardItem, pastingInto application: NSRunningApplication?) {
         let repository = repository
         Task(priority: .utility) {
             guard let data = await Self.loadBlob(repository: repository, item: item) else { return }
-            writeToPasteboard(data, item: item)
+            // Файл восстанавливается здесь же, вне главного потока: запись
+            // байтов на диск — такой же ввод-вывод, как их чтение, и
+            // оставлять её на MainActor значило бы починить одну половину
+            // проблемы и не заметить вторую.
+            let fileURL = item.kind == .file
+                ? await Self.writeTemporaryFile(data, name: item.textBody)
+                : nil
+            deliver(data, fileURL: fileURL, item: item, pastingInto: application)
         }
     }
 
-    /// NSImage и запись в NSPasteboard — на главном потоке. Тот же принцип,
-    /// что «Image строится на главном потоке» в apply(_:) ниже: сам объект
-    /// платформенной картинки не Sendable, поэтому он и не должен покидать
-    /// MainActor.
-    private func writeToPasteboard(_ data: Data, item: ClipboardItem) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
+    /// NSImage и работа с NSPasteboard — на главном потоке: платформенная
+    /// картинка не Sendable и покидать MainActor не должна.
+    private func deliver(
+        _ data: Data, fileURL: URL?, item: ClipboardItem, pastingInto application: NSRunningApplication?
+    ) {
+        let objects: [any NSPasteboardWriting]
         switch item.kind {
         case .image:
             guard let image = NSImage(data: data) else { return }
-            pasteboard.writeObjects([image])
+            objects = [image]
         case .file:
-            guard let url = Self.writeTemporaryFile(data, name: item.textBody) else { return }
-            pasteboard.writeObjects([url as NSURL])
+            guard let fileURL else { return }
+            objects = [fileURL as NSURL]
         case .text:
-            break  // сюда не попадает: activate/copyOnly отправляют текст через PasteService
+            return  // сюда не попадает: текст идёт через PasteService напрямую
+        }
+
+        if let application {
+            PasteService.paste(objects: objects, into: application)
+        } else {
+            PasteService.copyOnly(objects: objects)
         }
     }
 
@@ -136,13 +153,20 @@ final class ClipboardViewModel {
     /// пастборд ссылку на давно исчезнувший или перемещённый оригинал было
     /// бы нечестно, поэтому создаётся новый файл с тем же содержимым и
     /// именем, и уже он идёт на пастборд.
-    nonisolated private static func writeTemporaryFile(_ data: Data, name: String?) -> URL? {
+    ///
+    /// `async` не для красоты: без него функция выполнилась бы прямо на
+    /// MainActor вызывающего, и `nonisolated` ничего бы не изменил — уводит
+    /// с актора именно `await` на функции без привязки к нему.
+    nonisolated private static func writeTemporaryFile(_ data: Data, name: String?) async -> URL? {
         let fileName = (name?.isEmpty == false) ? name! : "файл"
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let fileURL = directory.appendingPathComponent(fileName)
+        let fileURL = temporaryDirectory.appendingPathComponent(fileName)
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            // Каталог пересоздаётся целиком перед каждой выдачей: иначе
+            // восстановленные файлы копились бы во временной папке до
+            // перезагрузки, по одному на каждый клик по файловой карточке.
+            // Отданный ранее файл к этому моменту уже вставлен.
+            try? FileManager.default.removeItem(at: temporaryDirectory)
+            try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
             try data.write(to: fileURL, options: .atomic)
             return fileURL
         } catch {
@@ -150,6 +174,11 @@ final class ClipboardViewModel {
             return nil
         }
     }
+
+    /// Куда восстанавливаются файлы из истории. Один каталог на всё
+    /// приложение, а не новый на каждую выдачу — см. writeTemporaryFile.
+    nonisolated private static let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("kz.mobilefirst.notchka-paste", isDirectory: true)
 
     /// Читает блоб вне главного потока. `async`, хотя `ClipboardRepository
     /// .data(for:)` сама по себе синхронна: именно `await` на асинхронной

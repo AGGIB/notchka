@@ -1,15 +1,7 @@
 import SwiftUI
 
 /// Карточка ленты буфера обмена.
-///
-/// `Sendable` сознательно не выведен: `thumbnail` хранит SwiftUI `Image`,
-/// который сам не `Sendable` (может оборачивать платформенный NSImage), а
-/// присваивать конформанс через `@unchecked` ради этого поля было бы
-/// обманом типа. `ClipboardCard` строится, хранится и читается только на
-/// MainActor — как и всё остальное дерево SwiftUI панели, — и этого
-/// достаточно; отдельной гарантии межпотокового обмена она не даёт и не
-/// должна.
-public struct ClipboardCard: Identifiable, Equatable {
+public struct ClipboardCard: Identifiable, Equatable, Sendable {
     public enum Kind: Sendable { case text, image, file }
 
     public let id: Int64

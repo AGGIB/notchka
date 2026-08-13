@@ -17,13 +17,34 @@ enum PasteService {
         pasteboard.setString(text, forType: .string)
     }
 
+    /// То же для не-текстового содержимого: картинки, ссылки на файл.
+    ///
+    /// Отдельный вход, потому что байты картинки нельзя положить строкой, а
+    /// «клик вставляет» обещано всем типам истории, не только тексту.
+    static func copyOnly(objects: [any NSPasteboardWriting]) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects(objects)
+    }
+
     /// Возвращает false, если нет разрешения: вызывающий показывает подсказку.
     @discardableResult
     static func paste(_ text: String, into application: NSRunningApplication?) -> Bool {
         copyOnly(text)
+        return pasteWhatIsOnPasteboard(into: application)
+    }
 
+    /// Вставка не-текстового содержимого. Механика ниже общая с текстом:
+    /// ⌘V не разбирается, что именно лежит в пастборде.
+    @discardableResult
+    static func paste(objects: [any NSPasteboardWriting], into application: NSRunningApplication?) -> Bool {
+        copyOnly(objects: objects)
+        return pasteWhatIsOnPasteboard(into: application)
+    }
+
+    private static func pasteWhatIsOnPasteboard(into application: NSRunningApplication?) -> Bool {
         guard AccessibilityPermission.isTrusted else {
-            logger.notice("вставка невозможна: нет разрешения Accessibility, текст только скопирован")
+            logger.notice("вставка невозможна: нет разрешения Accessibility, содержимое только скопировано")
             return false
         }
 
