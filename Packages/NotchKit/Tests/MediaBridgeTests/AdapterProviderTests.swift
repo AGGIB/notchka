@@ -28,9 +28,9 @@ func commandCodesMatchSpike() {
     #expect(MediaCommand.play.adapterCode == 0)
     #expect(MediaCommand.pause.adapterCode == 1)
     #expect(MediaCommand.toggle.adapterCode == 2)
-    // next/previous проверены отдельно от исходного спайка — владельцем,
-    // вручную, на живой системе (см. doc MediaCommand): реальная смена
-    // трека на живом YouTube в Safari, а не документация или заголовок.
+    // next/previous проверены отдельно от исходного спайка (см. doc
+    // MediaCommand): реальная смена трека на живом YouTube в Safari, а не
+    // документация и не заголовок фреймворка.
     #expect(MediaCommand.next.adapterCode == 4)
     #expect(MediaCommand.previous.adapterCode == 5)
 }
