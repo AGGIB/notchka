@@ -66,18 +66,37 @@ func snippetOrderColumnExists() throws {
     }
 }
 
-@Test("индекс не связан с таблицами-владельцами внешними ключами")
-func searchIndexIsIndependent() throws {
+/// Проверяет само решение, а не наличие таблицы: индекс не связан с
+/// владельцами внешними ключами, поэтому удаление записи НЕ уносит с собой
+/// её строку индекса. Чистка — обязанность репозитория, и именно на ней
+/// держится то, что удалённая заметка перестаёт находиться поиском.
+///
+/// Прошлая версия этого теста проверяла только `tableExists` — ровно то же,
+/// что и `allTablesExist` строкой выше, — и прошла бы при любой схеме, в том
+/// числе с каскадным удалением, которого мы как раз не хотим.
+///
+/// Сама таблица индекса при этом обычная FTS5, НЕ contentless: план 3 выбрал
+/// так намеренно, потому что из contentless нельзя удалять обычным
+/// `DELETE ... WHERE`, а именно им её и чистят. Не «оптимизировать» обратно.
+@Test("удаление владельца не уносит строку индекса — чистит репозиторий")
+func searchIndexSurvivesOwnerDeletion() throws {
     let database = try migratedDatabase()
-    // Индекс не знает о таблицах-владельцах: связь держится парой
-    // (owner_kind, owner_id), внешних ключей нет, и чистка при удалении —
-    // ответственность репозиториев.
-    //
-    // Таблица при этом обычная FTS5, НЕ contentless — план 3 выбрал так
-    // намеренно: из contentless нельзя удалять обычным DELETE ... WHERE,
-    // а именно им чистятся строки. Не «оптимизировать» её обратно.
-    try database.queue.read { db in
-        let hasSearchIndex = try db.tableExists("search_index")
-        #expect(hasSearchIndex)
+    try database.queue.write { db in
+        try db.execute(
+            sql: "INSERT INTO notes (body, created_at, updated_at) VALUES (?, ?, ?)",
+            arguments: ["заметка", Date(), Date()]
+        )
+        let noteID = db.lastInsertedRowID
+        try db.execute(
+            sql: "INSERT INTO search_index (owner_kind, owner_id, title, body) VALUES (?, ?, ?, ?)",
+            arguments: ["note", noteID, "", "заметка"]
+        )
+        try db.execute(sql: "DELETE FROM notes WHERE id = ?", arguments: [noteID])
     }
+
+    let orphaned = try database.queue.read { db in
+        try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM search_index WHERE owner_kind = 'note'")
+    }
+    #expect(orphaned == 1)
 }
+

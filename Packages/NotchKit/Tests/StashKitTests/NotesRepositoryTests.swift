@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import GRDB
 import NotchStore
 @testable import StashKit
 
@@ -73,4 +74,30 @@ func noteIsIndexed() throws {
         try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM search_index WHERE owner_kind = 'note'") ?? 0
     }
     #expect(afterDelete == 0)
+}
+
+/// Правка обязана доезжать до индекса, а не только до самой заметки.
+///
+/// Без этого поиск продолжал бы находить заметку по старому тексту и не
+/// находил бы по новому — молча, потому что и запись, и поиск по
+/// отдельности работают. Тест дописан после ревью: бриф задачи давал
+/// проверки только на создание и удаление, а обновление осталось без неё.
+@Test("правка заметки обновляет и поисковый индекс")
+func updateRefreshesSearchIndex() throws {
+    let database = try NotchDatabase(location: .temporary())
+    try database.migrate()
+    let repository = NotesRepository(database: database)
+    try repository.add("первоначальныйтекст", at: t0)
+    let note = try #require(try repository.all().first)
+
+    try repository.update(id: try #require(note.id), body: "исправленныйтекст", at: t0.addingTimeInterval(60))
+
+    let indexed = try database.queue.read { db in
+        try String.fetchOne(
+            db,
+            sql: "SELECT body FROM search_index WHERE owner_kind = 'note' AND owner_id = ?",
+            arguments: [note.id]
+        )
+    }
+    #expect(indexed == "исправленныйтекст")
 }
