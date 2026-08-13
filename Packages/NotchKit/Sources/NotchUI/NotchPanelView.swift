@@ -79,10 +79,13 @@ public struct NotchPanelView<Content: View>: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(
-                width: size.width - PanelMetrics.contentInsets.width,
-                height: size.height - PanelMetrics.contentInsets.height
+                width: size.width - PanelMetrics.contentInsets(notchHeight: notchSize.height).width,
+                height: size.height - PanelMetrics.contentInsets(notchHeight: notchSize.height).height
             )
-            .padding(.top, 24)
+            // Отступ сверху равен настоящей высоте выреза плюс просвет, а не
+            // константе: вырез на этой машине 32 pt, а отступ был 24 — чёлка
+            // накрывала верх обложки и название трека.
+            .padding(.top, notchSize.height + PanelMetrics.notchGap)
             // Морф формы и проявление содержимого — разные вещи. При
             // Reduce Motion форма меняется мгновенно, и переход целиком
             // отдаётся прозрачности: это вторая половина требования
