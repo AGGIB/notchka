@@ -139,10 +139,14 @@ private struct TabRailItemStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(backdrop)
-            // Нажатие — единственная реакция с явной анимацией: остальные
-            // переходы (выбор вкладки) наследуют пружину/приглушённое
-            // затухание NotchMotion через .animation(value: state) в
-            // NotchPanelView.body, а не заводят собственную константу.
+            // Нажатие отзывается мгновенно, без сглаживания: своей анимации
+            // здесь нет намеренно. В NotchMotion нет константы подходящего
+            // порядка — opening/closing привязаны к состояниям панели, а
+            // accentFade в 0.6 с на порядок медленнее, чем нужно нажатию, —
+            // а заводить собственную запрещено правилом проекта. Подложка
+            // выбранной вкладки, в отличие от этого, анимируется: она
+            // наследует пружину NotchMotion через .animation(value: state)
+            // в NotchPanelView.body.
             .scaleEffect(configuration.isPressed ? 0.92 : 1)
     }
 

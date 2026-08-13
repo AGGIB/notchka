@@ -14,6 +14,23 @@ public enum PanelMetrics {
     public static let peekPadding = CGSize(width: 120, height: 28)
     public static let expandedSize = CGSize(width: 620, height: 240)
 
+    /// Сколько панель отъедает у содержимого: по ширине — поля с обеих
+    /// сторон, по высоте — вырез чёлки сверху и поле снизу.
+    ///
+    /// Живёт здесь, а не литералами в месте применения, чтобы содержимое
+    /// вкладок могло сверяться с реально доступным местом. Без такой сверки
+    /// разъезд не обнаруживается ничем: SwiftUI на переполнении не даёт ни
+    /// ошибки, ни предупреждения — он молча обрезает или накладывает.
+    public static let contentInsets = CGSize(width: 26, height: 38)
+
+    /// Место, остающееся содержимому вкладки в раскрытой панели.
+    public static var contentSize: CGSize {
+        CGSize(
+            width: expandedSize.width - contentInsets.width,
+            height: expandedSize.height - contentInsets.height
+        )
+    }
+
     public static func size(for state: NotchState, notch: CGSize) -> CGSize {
         switch state {
         case .closed:

@@ -51,8 +51,10 @@ public struct MusicTabView: View {
     /// минус отступы NotchPanelView даёт 202 pt) так, чтобы обложка занимала
     /// её почти целиком и под ней не оставалось пустой полосы — это была
     /// главная жалоба на прежний вид с обложкой 58×58. Изменится
-    /// expandedSize — стоит пересмотреть и это число.
-    private static let artworkSize: CGFloat = 190
+    /// expandedSize — стоит пересмотреть и это число. Не `private`, чтобы
+    /// эту связь проверял тест, а не только настоящий комментарий:
+    /// переполнение SwiftUI не диагностирует никак.
+    static let artworkSize: CGFloat = 190
     /// Скругление увеличено пропорционально стороне: было 10 pt на 58 pt
     /// (≈17%), то же соотношение на 190 pt даёт ≈33 pt.
     private static let artworkCornerRadius: CGFloat = 33
@@ -90,7 +92,11 @@ public struct MusicTabView: View {
     /// обложкой и под текстом остаётся та же пустая полоса, из-за которой
     /// панель просили переделать.
     private func playing(_ track: TrackDisplay) -> some View {
-        HStack(alignment: .center, spacing: Self.artworkGap) {
+        // Выравнивание по верху, а не по центру: колонка плеера растянута на
+        // всю высоту строки и начинает текст сверху, а обложка ниже её на
+        // 12 pt. При центрировании она опускалась бы на 6 pt, и верх названия
+        // оказывался бы выше верха обложки — края не сходятся.
+        HStack(alignment: .top, spacing: Self.artworkGap) {
             artworkView
             playerColumn(track)
         }

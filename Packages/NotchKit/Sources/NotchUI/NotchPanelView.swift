@@ -78,7 +78,10 @@ public struct NotchPanelView<Content: View>: View {
                 content(tab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(width: size.width - 26, height: size.height - 38)
+            .frame(
+                width: size.width - PanelMetrics.contentInsets.width,
+                height: size.height - PanelMetrics.contentInsets.height
+            )
             .padding(.top, 24)
             // Морф формы и проявление содержимого — разные вещи. При
             // Reduce Motion форма меняется мгновенно, и переход целиком
