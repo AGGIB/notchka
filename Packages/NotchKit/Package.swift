@@ -22,8 +22,13 @@ let package = Package(
         .target(name: "NotchStore", dependencies: [.product(name: "GRDB", package: "GRDB.swift")]),
         // Чистая логика фильтров: без GRDB и без NotchStore — ей нечего знать про базу.
         .target(name: "ClipboardKit"),
-        // Репозиторий заметок: зависит от NotchStore ради NotchDatabase и, тем самым, от GRDB.
-        .target(name: "StashKit", dependencies: ["NotchStore"]),
+        // Репозитории заметок и пинов: зависят от NotchStore ради NotchDatabase,
+        // и от GRDB напрямую — Note/Snippet сами GRDB-записи (FetchableRecord
+        // и т.д.), а не только потребители готового NotchDatabase.
+        .target(name: "StashKit", dependencies: [
+            "NotchStore",
+            .product(name: "GRDB", package: "GRDB.swift"),
+        ]),
         .testTarget(name: "NotchCoreTests", dependencies: ["NotchCore"]),
         .testTarget(name: "NotchUITests", dependencies: ["NotchUI"]),
         .testTarget(name: "MediaBridgeTests", dependencies: ["MediaBridge"]),

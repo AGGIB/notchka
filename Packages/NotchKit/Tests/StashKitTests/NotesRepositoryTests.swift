@@ -40,11 +40,30 @@ func updateKeepsCreationTime() throws {
     #expect(updated.updatedAt == t0.addingTimeInterval(600))
 }
 
-@Test("пустая заметка не сохраняется")
+/// Бросает, а не молча ничего не делает: вызывающий код должен уметь
+/// отличить «сохранено» от «отклонено», чтобы, например, не очищать поле
+/// ввода после пустого ⌘↩.
+@Test("пустая заметка не сохраняется — бросает EmptyBodyError")
 func emptyNoteIsRejected() throws {
     let repository = try makeRepository()
-    try repository.add("   \n  ", at: t0)
+    #expect(throws: NotesRepository.EmptyBodyError.self) {
+        try repository.add("   \n  ", at: t0)
+    }
     #expect(try repository.all().isEmpty)
+}
+
+/// Тот же отказ, тем же способом, что и на создании — throw, а не тихий
+/// возврат старого содержимого.
+@Test("пустая правка не применяется — бросает EmptyBodyError")
+func emptyUpdateIsRejected() throws {
+    let repository = try makeRepository()
+    try repository.add("исходный текст", at: t0)
+    let note = try #require(try repository.all().first)
+
+    #expect(throws: NotesRepository.EmptyBodyError.self) {
+        try repository.update(id: try #require(note.id), body: "   ", at: t0.addingTimeInterval(60))
+    }
+    #expect(try repository.all().first?.body == "исходный текст")
 }
 
 @Test("удаление убирает заметку")
