@@ -44,12 +44,19 @@ final class NotchController {
         }
     }
 
+    /// Останавливает источники событий. Существует отдельно от deinit, потому
+    /// что на deinit полагаться нельзя: контроллер держит не только AppDelegate,
+    /// но и NSHostingView панели через NotchRootView, и обнуление ссылки в
+    /// AppDelegate само по себе не освобождает его. Оба вызова внутри
+    /// идемпотентны, так что повторный stop() (в том числе из deinit) безвреден.
+    func stop() {
+        cursor.stop()
+        hotkey.unregister()
+    }
+
     deinit {
         // Тот же приём и то же обоснование, что в HotkeyCenter.deinit.
-        MainActor.assumeIsolated {
-            cursor.stop()
-            hotkey.unregister()
-        }
+        MainActor.assumeIsolated { stop() }
     }
 
     /// Обновляет геометрию при смене конфигурации экранов — вызывается из

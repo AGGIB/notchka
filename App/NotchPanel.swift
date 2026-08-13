@@ -28,6 +28,10 @@ final class NotchPanel: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
+        // NSWindow по умолчанию сам себя освобождает при close(), а ARC об этом
+        // не знает и освободит окно второй раз по своей сильной ссылке.
+        // AppDelegate закрывает панель явно, когда чёлка пропадает с экрана.
+        isReleasedWhenClosed = false
         // Тень рисуем сами — системная не умеет вогнутые углы.
         hasShadow = false
         isMovable = false
