@@ -1659,7 +1659,7 @@ Expected: FAIL — `cannot find 'ClipboardCard' in scope`
 ```swift
 import SwiftUI
 
-public struct ClipboardCard: Identifiable, Equatable, Sendable {
+public struct ClipboardCard: Identifiable, Equatable {
     public enum Kind: Sendable { case text, image, file }
 
     public let id: Int64
@@ -1667,13 +1667,26 @@ public struct ClipboardCard: Identifiable, Equatable, Sendable {
     public let preview: String
     public let source: String
     public let isPinned: Bool
+    /// Готовая картинка для карточки-скриншота.
+    ///
+    /// Именно `Image`, а не байты: NotchUI не импортирует AppKit, а без него
+    /// собрать картинку из `Data` в SwiftUI нечем — `Image(data:)` не
+    /// существует. Поэтому картинку строит app-таргет и передаёт готовой,
+    /// ровно как уже сделано с обложкой альбома в MusicTabView.
+    /// Приёмка требует, чтобы карточка со скриншотом показывала картинку,
+    /// а не подпись «Снимок экрана», — без этого поля выполнить это нечем.
+    public let thumbnail: Image?
 
-    public init(id: Int64, kind: Kind, preview: String, source: String, isPinned: Bool) {
+    public init(
+        id: Int64, kind: Kind, preview: String, source: String,
+        isPinned: Bool, thumbnail: Image? = nil
+    ) {
         self.id = id
         self.kind = kind
         self.preview = preview
         self.source = source
         self.isPinned = isPinned
+        self.thumbnail = thumbnail
     }
 
     /// Превью для карточки.
@@ -1703,6 +1716,17 @@ public struct ClipboardCard: Identifiable, Equatable, Sendable {
 Создай `App/ClipboardViewModel.swift`: `@Observable`, читает `recent(limit:)`
 при открытии панели, отдаёт карточки, обрабатывает активацию через
 `PasteService`.
+
+Репозиторий уже создаётся в `AppDelegate.startClipboardService()` и пока
+уходит только в `ClipboardService`. Сохрани его там же и отдай модели —
+второе соединение с той же базой заводить незачем: `DatabaseQueue`
+сериализует доступ сам, и один экземпляр обслуживает обоих.
+
+Активация элемента, кроме вставки, обязана звать `touch(id:at:)`: вставленное
+из истории снова стало актуальным и должно оказаться в начале ленты, а не
+там, где лежало. Приложение, куда вставлять, бери из
+`NotchController.frontmostApplicationBeforeExpanding` — оно захвачено в
+момент разворота панели, до того как фокус ушёл к нам.
 
 Не держи подписку на базу постоянно: лента нужна только при раскрытой
 панели, а в покое приложение обязано спать.
