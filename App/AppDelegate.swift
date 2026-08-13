@@ -56,6 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// истории буфера. Поднимается в startClipboardService(), см. её doc.
     private var clipboardService: ClipboardService?
 
+    /// Репозиторий истории буфера — тот же экземпляр, что получает
+    /// ClipboardService. Второе соединение с той же базой заводить незачем:
+    /// DatabaseQueue сериализует доступ сам, поэтому один репозиторий вполне
+    /// обслуживает и опрос пастборда, и вкладку буфера (см.
+    /// startClipboardService() и refreshNotchScreen()).
+    private var clipboardRepository: ClipboardRepository?
+
     private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "AppDelegate")
 
     static func main() {
@@ -196,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let service = ClipboardService(repository: repository)
             service.start()
             clipboardService = service
+            clipboardRepository = repository
         } catch {
             Self.logger.error("не удалось поднять хранилище истории буфера: \(error, privacy: .public)")
         }
@@ -239,8 +247,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             screenFrame: screen.frame,
             panel: panel
         )
+        // Модель буфера строится один раз здесь же, вместе с контроллером —
+        // не в свойстве AppDelegate, как musicModel: репозиторий появляется
+        // позже, в startClipboardService(), а не в момент инициализации
+        // AppDelegate, так что готовый экземпляр musicModel-стиля завести
+        // нельзя. Дальше она живёт внутри NotchRootView ровно тот же срок,
+        // что и сам контроллер — повторные вызовы refreshNotchScreen() (смена
+        // экрана) сюда не доходят, см. ранний return выше.
+        let clipboardModel = clipboardRepository.map(ClipboardViewModel.init(repository:))
         panel.contentView = NSHostingView(
-            rootView: NotchRootView(controller: controller, notchSize: geometry.notchRect.size, musicModel: musicModel)
+            rootView: NotchRootView(
+                controller: controller, notchSize: geometry.notchRect.size,
+                musicModel: musicModel, clipboardModel: clipboardModel
+            )
         )
         controller.start()
         self.controller = controller
@@ -335,12 +354,25 @@ private struct NotchRootView: View {
     let controller: NotchController
     let notchSize: CGSize
     let musicModel: MusicViewModel
+    /// `nil`, когда startClipboardService() не смог поднять хранилище (см.
+    /// её doc в AppDelegate) — вкладка буфера в этом случае показывает
+    /// TabPlaceholderView вместо ленты, тем же путём, что и ещё не
+    /// подключённые заметки и пины.
+    let clipboardModel: ClipboardViewModel?
 
     /// Раскрыта ли панель, независимо от того, какая именно вкладка внутри.
     /// Брифом задано именно такое условие для обновления позиции трека:
     /// `if case .expanded = controller.state`, без привязки к вкладке.
     private var isExpanded: Bool {
         if case .expanded = controller.state { return true }
+        return false
+    }
+
+    /// Раскрыта ли панель именно на вкладке буфера — в отличие от isExpanded
+    /// выше, здесь важна конкретная вкладка: лента должна перечитывать
+    /// историю при своём открытии, а не при любом раскрытии панели.
+    private var isClipboardTabActive: Bool {
+        if case .expanded(.clipboard) = controller.state { return true }
         return false
     }
 
@@ -372,10 +404,19 @@ private struct NotchRootView: View {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+        .task(id: isClipboardTabActive) {
+            // Не тикающий цикл, в отличие от позиции трека выше: истории
+            // буфера не нужно опрашивать раз в секунду, она читается один
+            // раз при открытии вкладки (решение №4 постановки) — .task(id:)
+            // и так перезапустит этот блок при каждом новом открытии, ничего
+            // отдельно повторять не нужно.
+            guard isClipboardTabActive, let clipboardModel else { return }
+            await clipboardModel.refresh()
+        }
     }
 
-    /// Вкладка музыки подключена по-настоящему; буфер, заметки и пины ждут
-    /// своих планов и показывают общую заглушку (TabPlaceholderView) —
+    /// Вкладки музыки и буфера подключены по-настоящему; заметки и пины
+    /// ждут своих планов и показывают общую заглушку (TabPlaceholderView) —
     /// оболочка не должна знать, что у них внутри.
     ///
     /// switch без default — намеренно. С default новый case NotchTab
@@ -393,7 +434,27 @@ private struct NotchRootView: View {
                 artwork: musicModel.artwork,
                 accent: musicModel.accent
             ) { musicModel.togglePlayback() }
-        case .clipboard, .notes, .pins:
+        case .clipboard:
+            if let clipboardModel {
+                ClipboardTabView(
+                    cards: clipboardModel.cards,
+                    selected: clipboardModel.selectedID,
+                    accent: musicModel.accent,
+                    onActivate: { id in
+                        // frontmostApplicationBeforeExpanding, а не
+                        // NSWorkspace.frontmostApplication здесь и сейчас:
+                        // фокус к моменту клика уже у самой Notchka (решение
+                        // №3 постановки).
+                        clipboardModel.activate(
+                            id: id, frontmostApplication: controller.frontmostApplicationBeforeExpanding
+                        )
+                    },
+                    onCopyOnly: { id in clipboardModel.copyOnly(id: id) }
+                )
+            } else {
+                TabPlaceholderView(tab: tab)
+            }
+        case .notes, .pins:
             TabPlaceholderView(tab: tab)
         }
     }
