@@ -136,18 +136,21 @@ public struct MusicTabView: View {
 
     private func trackInfo(_ track: TrackDisplay) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(track.title)
-                .font(.system(size: 18, weight: .semibold))
-                .lineLimit(1)
-            Text(track.artist)
-                .font(.system(size: 13))
+            // MarqueeText сама решает, обрезать текст или прокручивать —
+            // владелец попросил прокрутку взамен немого «…» у длинных
+            // названий (см. MarqueeMetrics.shouldScroll). Исполнитель по
+            // тому же принципу: короткий стоит на месте, длинный едет.
+            MarqueeText(track.title, font: .system(size: 18, weight: .semibold))
+            MarqueeText(track.artist, font: .system(size: 13))
                 .foregroundStyle(.white.opacity(0.55))
-                .lineLimit(1)
             sourceBadge(track.source)
                 .padding(.top, 5)
         }
         // Явная граница ширины — иначе длинному названию трека нечего
         // truncate: lineLimit(1) укорачивает только там, где есть предел.
+        // MarqueeText опирается на тот же принцип: без реальной, не
+        // бесконечной ширины здесь ей не с чем сравнить ширину текста,
+        // чтобы решить, нужна ли прокрутка (MarqueeMetrics.shouldScroll).
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
