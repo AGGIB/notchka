@@ -173,3 +173,55 @@ func jsonWithTimeoutInDataIsNotTransientFailure() {
     }
     #expect(snapshot.title == "Reading timed out")
 }
+
+// MARK: - parseSnapshot (голый payload команды `get`, без конверта)
+
+/// Дословный вывод `get`, снятый вручную с живой системы во время
+/// диагностики дефекта «панель навсегда застревает на источнике короткой
+/// интерцепции» — не выдуман. В отличие от строк `stream` выше, это голый
+/// `NowPlayingPayload`: `get` печатает его как есть, без конверта
+/// `{"type":..,"diff":..,"payload":..}`.
+private let getCommandPayloadLine =
+    #"{"playbackRate":1,"album":"","elapsedTime":67.62,"timestamp":"2026-08-13T10:08:31Z","bundleIdentifier":"com.apple.WebKit.GPU","processIdentifier":63903,"parentApplicationBundleIdentifier":"com.apple.Safari","title":"Sam Smith - I'm Not The Only One (Lyrics)","uniqueIdentifier":6671484,"duration":237.561,"artist":"Dan Music","contentItemIdentifier":"6671484","playing":true}"#
+
+@Test("payload команды get разбирается в снимок с верными названием, исполнителем, длительностью и признаком воспроизведения")
+func getCommandPayloadParsesAsSnapshot() throws {
+    let snapshot = try #require(AdapterLine.parseSnapshot(getCommandPayloadLine))
+    #expect(snapshot.title == "Sam Smith - I'm Not The Only One (Lyrics)")
+    #expect(snapshot.artist == "Dan Music")
+    #expect(abs(snapshot.duration - 237.561) < 0.001)
+    #expect(snapshot.isPlaying == true)
+    // Бонус к обязательным полям: этот payload — тот самый случай Safari
+    // (см. helperProcessCarriesParentBundleID выше), полезно убедиться, что
+    // parseSnapshot несёт то же различение источника, что и обычный parse.
+    #expect(snapshot.sourceBundleID == "com.apple.WebKit.GPU")
+    #expect(snapshot.parentApplicationBundleID == "com.apple.Safari")
+    #expect(abs(snapshot.elapsedTime - 67.62) < 0.001)
+}
+
+@Test("голый payload get не распознаётся старым parse — ему нужен конверт")
+func bareGetPayloadIsUnrecognizedByEnvelopeParse() {
+    // Регрессия ровно на то предостережение из постановки задачи: parse(_:)
+    // разбирает строки stream и требует конверт; формат get через него не
+    // должен молча превращаться в снимок или дифф.
+    guard case .unrecognized = AdapterLine.parse(getCommandPayloadLine) else {
+        Issue.record("голый payload get не должен проходить через parse(_:) как снимок или дифф")
+        return
+    }
+}
+
+@Test("parseSnapshot не путает конверт stream с голым payload")
+func parseSnapshotIgnoresEnvelopedLine() {
+    // Обратная сторона теста выше: конверт stream — тоже валидный JSON, но
+    // его поля лежат внутри вложенного "payload", а не на верхнем уровне.
+    // parseSnapshot ищет title/artist/... на верхнем уровне и не должен
+    // выдумывать трек из вложенного объекта — просто не найдёт ни одного
+    // поля и вернёт nil (isEmpty), а не упадёт и не соберёт мусор.
+    #expect(AdapterLine.parseSnapshot(fullPayloadLine) == nil)
+}
+
+@Test("parseSnapshot не падает на мусоре")
+func parseSnapshotHandlesGarbage() {
+    #expect(AdapterLine.parseSnapshot("{не json") == nil)
+    #expect(AdapterLine.parseSnapshot("   ") == nil)
+}

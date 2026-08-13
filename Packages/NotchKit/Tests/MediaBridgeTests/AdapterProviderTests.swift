@@ -23,11 +23,16 @@ private let pausedBase = NowPlayingSnapshot(
 /// является предметом теста.
 private let now = Date(timeIntervalSince1970: 2_000_000)
 
-@Test("коды команд совпадают с проверенными спайком")
+@Test("коды команд совпадают с проверенными эмпирически")
 func commandCodesMatchSpike() {
     #expect(MediaCommand.play.adapterCode == 0)
     #expect(MediaCommand.pause.adapterCode == 1)
     #expect(MediaCommand.toggle.adapterCode == 2)
+    // next/previous проверены отдельно от исходного спайка (см. doc
+    // MediaCommand): реальная смена трека на живом YouTube в Safari, а не
+    // документация и не заголовок фреймворка.
+    #expect(MediaCommand.next.adapterCode == 4)
+    #expect(MediaCommand.previous.adapterCode == 5)
 }
 
 @Test("снимок заменяет состояние целиком")
@@ -177,4 +182,16 @@ func shutdownWithoutPriorAccessIsSafe() async {
     let provider = AdapterProvider(paths: unreachablePaths)
     await provider.shutdown()
     #expect(await provider.pumpsStarted == 0)
+}
+
+/// refresh() бросает на осечке, а не сводит её к nil: nil означает «ничего
+/// не играет», и вызывающая сторона на него очищает экран. Свести туда же
+/// неудачу запроса значило бы гасить панель у пользователя, у которого
+/// музыка идёт, — и тем чаще, чем чаще идёт пересинхронизация по таймеру.
+@Test("refresh на недостижимых путях бросает, а не выдаёт nil")
+func refreshOnUnreachablePathsThrows() async {
+    let provider = AdapterProvider(paths: unreachablePaths)
+    await #expect(throws: (any Error).self) {
+        try await provider.refresh()
+    }
 }

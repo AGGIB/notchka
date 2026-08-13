@@ -30,6 +30,11 @@
 - Клик вставляет, `⌥`клик копирует. Оригинал пастборда не восстанавливается.
 - Файлы 200–400 строк типично, 800 максимум. Функции до 50 строк.
 - Комментарии на русском, объясняют «почему», а не «что».
+- **Комментарий обязан описывать то, что код действительно делает.**
+  Правило перенесено из планов 1 и 2, где на расхождение комментария с
+  поведением пришлась примерно половина всех находок ревью. Если код в
+  этом плане противоречит своему комментарию — прав код, а комментарий
+  правится; молча оставлять расхождение нельзя.
 - Формат коммитов: `<type>: <описание>`.
 
 ## Про приватность — прочитать до начала
@@ -187,10 +192,8 @@ import GRDB
 /// сегодня, разойдётся со схемой, которую ожидает код завтра.
 public final class NotchDatabase: Sendable {
     public let queue: DatabaseQueue
-    private let location: StoreLocation
 
     public init(location: StoreLocation) throws {
-        self.location = location
         try location.createDirectories()
         self.queue = try DatabaseQueue(path: location.databaseURL.path)
     }
@@ -220,9 +223,14 @@ public final class NotchDatabase: Sendable {
         }
 
         migrator.registerMigration("v2-search") { db in
-            // Contentless FTS: тексты уже лежат в своих таблицах, дублировать
-            // их внутрь индекса незачем. Строки индекса ведут на владельца
-            // парой (owner_kind, owner_id).
+            // Обычная таблица FTS5, а не contentless: индекс хранит копию
+            // текста. Это сознательный размен. Contentless (content='')
+            // сэкономил бы место, но удалять из него можно только особой
+            // командой по rowid, а строки индекса ведут на владельца парой
+            // (owner_kind, owner_id) — по ней и удаляем в Task 4, обычным
+            // DELETE ... WHERE. Стоимость размена невелика: в индекс идёт
+            // только текстовая часть записи — сам текст либо имя файла.
+            // Байты картинок и файлов сюда не попадают.
             try db.create(virtualTable: "search_index", using: FTS5()) { t in
                 t.column("owner_kind").notIndexed()
                 t.column("owner_id").notIndexed()
@@ -873,14 +881,44 @@ public struct ClipboardRepository: Sendable {
         }
     }
 
+    /// Удаляет запись вместе с её блобом.
+    ///
+    /// Сначала строки, потом файл, и только после успешной транзакции.
+    /// Порядок неслучаен: удаление файла не откатывается вместе с SQL, и
+    /// при обратном порядке прерванная транзакция оставила бы запись,
+    /// ссылающуюся на несуществующий блоб, — то есть видимо сломанный
+    /// элемент в ленте. Осиротевший файл при том же сбое стоит места на
+    /// диске, но ничего не ломает; из двух исходов выбран второй.
     public func delete(id: Int64) throws {
-        try database.queue.write { db in
+        let blobPath = try database.queue.write { db in
             let item = try ClipboardItem.filter(Column("id") == id).fetchOne(db)
-            // Блоб удаляется вместе с записью: осиротевший файл не найдёт
-            // никто, а место он занимать продолжит.
-            if let path = item?.blobPath { try? blobs.remove(at: path) }
             try db.execute(sql: "DELETE FROM clipboard_items WHERE id = ?", arguments: [id])
             try db.execute(sql: "DELETE FROM search_index WHERE owner_kind = 'clipboard' AND owner_id = ?", arguments: [id])
+            return item?.blobPath
+        }
+
+        guard let blobPath else { return }
+        do {
+            try blobs.remove(at: blobPath)
+        } catch {
+            // Отсутствие файла BlobStore.remove гасит сам, так что сюда
+            // долетает только настоящий сбой — прав доступа или ввода-вывода.
+            // Молча проглотить его нельзя: запись уже удалена, файл остался
+            // навсегда, и без записи в журнале это никак не объяснимо.
+            logger.error("не удалось удалить блоб \(blobPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Поднимает запись наверх ленты, не меняя её содержимого.
+    ///
+    /// Нужен, когда пользователь вставляет старый элемент: он снова стал
+    /// актуальным и должен оказаться под рукой, а не там, где лежал.
+    public func touch(id: Int64, at now: Date = Date()) throws {
+        try database.queue.write { db in
+            try db.execute(
+                sql: "UPDATE clipboard_items SET last_used_at = ? WHERE id = ?",
+                arguments: [now, id]
+            )
         }
     }
 
@@ -1219,6 +1257,11 @@ import ClipboardKit
 
 /// Мост от NSPasteboard к чистым типам.
 enum PasteboardReader {
+    /// Потолок на размер захватываемого файла — 50 МБ. Величина взята с
+    /// запасом на обычное: документы, архивы, картинки. Всё, что крупнее,
+    /// копируют не для того, чтобы вставлять из истории буфера.
+    static let maxFileBytes = 50 * 1024 * 1024
+
     struct Content {
         let snapshot: PasteboardSnapshot
         let text: String?
@@ -1239,8 +1282,16 @@ enum PasteboardReader {
 
         // Порядок важен: файл может нести и текстовое представление,
         // и картинку-превью, а показать его надо файлом.
+        //
+        // Размер ограничен: содержимое файла читается в память целиком и
+        // копируется в блобы, поэтому скопированный в Finder образ диска
+        // на несколько гигабайт иначе подвесил бы приложение и съел диск.
+        // Крупные файлы просто не попадают в историю — это честнее, чем
+        // класть в неё усечённую копию, которую нельзя вставить обратно.
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
            let url = urls.first, url.isFileURL,
+           let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size <= maxFileBytes,
            let data = try? Data(contentsOf: url)
         {
             return Content(snapshot: snapshot, text: nil, image: nil,
@@ -1269,7 +1320,18 @@ enum PasteboardReader {
 Создай в app-таргете службу, которая раз в `PasteboardPoller.interval`
 на низкоприоритетной очереди спрашивает поллер, читает пастборд через
 `PasteboardReader`, прогоняет через `PrivacyFilter` и пишет в репозиторий.
-Неактивность бери из `CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .null)`.
+Неактивность бери из `CGEventSource.secondsSinceLastEventType`, но с
+правильной константой события:
+
+```swift
+// kCGAnyInputEventType — «любое событие ввода». Именованного случая в
+// CGEventType для неё нет, отсюда сырое значение.
+let anyInput = CGEventType(rawValue: ~0)!
+let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
+```
+
+Не `.null`: это нулевое событие, а не «любое», и время с последнего такого
+события не имеет отношения к тому, отошёл ли человек от машины.
 
 Чистку `prune` вызывай не на каждую запись, а раз в сутки и при запуске:
 проход по всей истории на каждое копирование — лишняя работа.
@@ -1597,7 +1659,7 @@ Expected: FAIL — `cannot find 'ClipboardCard' in scope`
 ```swift
 import SwiftUI
 
-public struct ClipboardCard: Identifiable, Equatable, Sendable {
+public struct ClipboardCard: Identifiable, Equatable {
     public enum Kind: Sendable { case text, image, file }
 
     public let id: Int64
@@ -1605,13 +1667,26 @@ public struct ClipboardCard: Identifiable, Equatable, Sendable {
     public let preview: String
     public let source: String
     public let isPinned: Bool
+    /// Готовая картинка для карточки-скриншота.
+    ///
+    /// Именно `Image`, а не байты: NotchUI не импортирует AppKit, а без него
+    /// собрать картинку из `Data` в SwiftUI нечем — `Image(data:)` не
+    /// существует. Поэтому картинку строит app-таргет и передаёт готовой,
+    /// ровно как уже сделано с обложкой альбома в MusicTabView.
+    /// Приёмка требует, чтобы карточка со скриншотом показывала картинку,
+    /// а не подпись «Снимок экрана», — без этого поля выполнить это нечем.
+    public let thumbnail: Image?
 
-    public init(id: Int64, kind: Kind, preview: String, source: String, isPinned: Bool) {
+    public init(
+        id: Int64, kind: Kind, preview: String, source: String,
+        isPinned: Bool, thumbnail: Image? = nil
+    ) {
         self.id = id
         self.kind = kind
         self.preview = preview
         self.source = source
         self.isPinned = isPinned
+        self.thumbnail = thumbnail
     }
 
     /// Превью для карточки.
@@ -1641,6 +1716,17 @@ public struct ClipboardCard: Identifiable, Equatable, Sendable {
 Создай `App/ClipboardViewModel.swift`: `@Observable`, читает `recent(limit:)`
 при открытии панели, отдаёт карточки, обрабатывает активацию через
 `PasteService`.
+
+Репозиторий уже создаётся в `AppDelegate.startClipboardService()` и пока
+уходит только в `ClipboardService`. Сохрани его там же и отдай модели —
+второе соединение с той же базой заводить незачем: `DatabaseQueue`
+сериализует доступ сам, и один экземпляр обслуживает обоих.
+
+Активация элемента, кроме вставки, обязана звать `touch(id:at:)`: вставленное
+из истории снова стало актуальным и должно оказаться в начале ленты, а не
+там, где лежало. Приложение, куда вставлять, бери из
+`NotchController.frontmostApplicationBeforeExpanding` — оно захвачено в
+момент разворота панели, до того как фокус ушёл к нам.
 
 Не держи подписку на базу постоянно: лента нужна только при раскрытой
 панели, а в покое приложение обязано спать.
@@ -1706,8 +1792,9 @@ git commit -m "feat: онбординг разрешения Accessibility"
 - [ ] **Step 1: Прогнать все тесты**
 
 Run: `swift test --package-path Packages/NotchKit`
-Expected: PASS. Ожидаемое число выведи сложением: 78 после плана 2 плюс
-3 + 7 + 8 + 6 + 6 + 6 + 5 + 5 = 46 новых, итого **124**.
+Expected: PASS. Ожидаемое число выведи сложением: **92** после плана 2
+(замерено на слитом master, а не оценка из черновика этого плана) плюс
+3 + 7 + 8 + 6 + 6 + 6 + 5 + 5 = 46 новых, итого **138**.
 
 - [ ] **Step 2: Релизная сборка без предупреждений**
 

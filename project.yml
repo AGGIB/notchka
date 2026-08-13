@@ -22,6 +22,10 @@ targets:
         product: NotchUI
       - package: NotchKit
         product: MediaBridge
+      - package: NotchKit
+        product: NotchStore
+      - package: NotchKit
+        product: ClipboardKit
     info:
       path: App/Info.plist
       properties:
@@ -37,7 +41,17 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
+        # Не ad-hoc ("-"), а собственный сертификат разработчика. macOS
+        # привязывает выданное разрешение Accessibility к подписи, а у
+        # ad-hoc отпечаток меняется при каждой сборке — разрешение
+        # приходилось бы выдавать заново после каждой пересборки. С
+        # постоянной подписью оно выдаётся один раз.
+        # Личный сертификат, а не корпоративный: Notchka — инструмент для
+        # себя, и привязывать его к чужой команде незачем.
         CODE_SIGN_IDENTITY: "-"
-        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGNING_REQUIRED: YES
+        PROVISIONING_PROFILE_SPECIFIER: ""
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_USER_SCRIPT_SANDBOXING: NO

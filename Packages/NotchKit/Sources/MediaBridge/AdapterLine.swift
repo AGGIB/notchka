@@ -135,4 +135,32 @@ public enum AdapterLine: Sendable, Equatable {
 
         return .unrecognized(line)
     }
+
+    /// Разбирает голый payload команды `get` — отдельный путь от `parse(_:)`
+    /// выше, а не его ветка внутри.
+    ///
+    /// `parse(_:)` рассчитан на строки `stream` и всегда ждёт конверт
+    /// `{"type":..,"diff":..,"payload":..}`; `get` печатает `NowPlayingPayload`
+    /// как есть, без конверта вообще, поэтому `Envelope.decode` на такой
+    /// строке не найдёт ключ `payload` и провалится — сама строка при этом
+    /// вполне валидный JSON, так что `parse(_:)` доехал бы до `.unrecognized`,
+    /// а не до осечки или снимка. Смешивать два формата в одном методе
+    /// значило бы либо ослаблять Envelope до опциональных полей (и тогда
+    /// строка stream без "type" тоже стала бы молча проходить как payload),
+    /// либо гадать по наличию ключей — оба варианта хуже честного отдельного
+    /// пути с говорящим именем.
+    ///
+    /// Существует ради разовой пересинхронизации (см. `AdapterProcess.get()`
+    /// / `AdapterProvider.refresh()`): нужен полный `NowPlayingSnapshot?`,
+    /// а не `AdapterLine` — вызывающей стороне неоткуда взять `diff`-флаг
+    /// для конверта, которого в этом формате не было изначально.
+    public static func parseSnapshot(_ line: String) -> NowPlayingSnapshot? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return nil }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let payload = try? decoder.decode(NowPlayingPayload.self, from: data) else { return nil }
+        return payload.asSnapshot()
+    }
 }
