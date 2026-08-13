@@ -22,6 +22,10 @@ targets:
         product: NotchUI
       - package: NotchKit
         product: MediaBridge
+      - package: NotchKit
+        product: NotchStore
+      - package: NotchKit
+        product: ClipboardKit
     info:
       path: App/Info.plist
       properties:

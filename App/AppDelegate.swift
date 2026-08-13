@@ -3,6 +3,8 @@ import SwiftUI
 import NotchCore
 import NotchUI
 import MediaBridge
+import NotchStore
+import ClipboardKit
 import Dispatch
 import CoreGraphics
 import os
@@ -47,6 +49,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         provider: AdapterProvider(paths: AdapterPaths.vendored(repoRoot: developmentRepoRoot))
     )
 
+    /// Служба истории буфера обмена. Optional, а не `let` с прямой
+    /// инициализацией, как у `musicModel`: `NotchDatabase.init` и `migrate()`
+    /// бросают (например, при нехватке места на диске), а отказ здесь не
+    /// должен ронять всё приложение — чёлка и музыка вполне работают без
+    /// истории буфера. Поднимается в startClipboardService(), см. её doc.
+    private var clipboardService: ClipboardService?
+
     private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "AppDelegate")
 
     static func main() {
@@ -60,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installTerminationHandling()
         musicModel.start()
+        startClipboardService()
         refreshNotchScreen()
 
         // Единственное уведомление AppKit, покрывающее сразу докинг/раздокинг
@@ -153,6 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.shutdownDeadline) {
             exit(1)
         }
+        // Синхронно и сразу: остановка таймеров не требует ожидания, в
+        // отличие от адаптера музыки ниже, — тот же уклад, что и у
+        // musicModel.stopAdapter(), но без async.
+        clipboardService?.stop()
         Task {
             await musicModel.stopAdapter()
             exit(0)
@@ -163,6 +177,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Спайк намерил, что адаптер завершается по SIGINT меньше чем за секунду,
     /// так что двух хватает с запасом на планирование.
     private static let shutdownDeadline: TimeInterval = 2
+
+    /// Поднимает хранилище истории буфера и запускает слежение за
+    /// пастбордом (см. ClipboardService).
+    ///
+    /// Отдельным методом, а не прямой инициализацией свойства, как у
+    /// musicModel: `NotchDatabase.init` и `migrate()` бросают, а брошенное
+    /// внутри инициализатора хранимого свойства уронило бы весь процесс
+    /// запуска приложения. Отказ здесь — не повод не показывать чёлку и не
+    /// играть музыку, поэтому ошибка только логируется, а служба остаётся
+    /// не запущенной.
+    private func startClipboardService() {
+        do {
+            let location = StoreLocation(bundleID: "kz.mobilefirst.notchka")
+            let database = try NotchDatabase(location: location)
+            try database.migrate()
+            let repository = ClipboardRepository(database: database, blobs: BlobStore(location: location))
+            let service = ClipboardService(repository: repository)
+            service.start()
+            clipboardService = service
+        } catch {
+            Self.logger.error("не удалось поднять хранилище истории буфера: \(error, privacy: .public)")
+        }
+    }
 
     /// Приводит панель и контроллер в соответствие текущей конфигурации
     /// экранов. Вызывается при запуске и затем при каждой смене конфигурации.
