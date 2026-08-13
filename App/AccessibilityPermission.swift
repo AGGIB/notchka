@@ -1,5 +1,15 @@
 import AppKit
-import ApplicationServices
+// @preconcurrency — из-за kAXTrustedCheckOptionPrompt ниже. ClangImporter
+// отдаёт эту C-константу как `var` (Unmanaged<CFString>!), и строгая
+// конкурентность Swift 6 считает любое обращение к ней чтением
+// разделяемого изменяемого состояния. Атрибут точечно снимает эти
+// диагностики для символов одного модуля в одном файле, не ослабляя
+// проверки ни для остального файла, ни для проекта. Это штатный механизм
+// SE-0337 ровно для такого случая — фреймворк на C, не переведённый на
+// модель конкурентности. Обёртка через nonisolated(unsafe) здесь не
+// работает: небезопасно само чтение импортированного символа, а не то,
+// куда кладётся результат.
+@preconcurrency import ApplicationServices
 
 /// Разрешение Accessibility — единственное, которое нужно приложению,
 /// и только ради посылки `⌘V` в чужое приложение.
@@ -8,21 +18,9 @@ enum AccessibilityPermission {
 
     /// Показывает системный запрос. Возвращает состояние на момент вызова:
     /// разрешение выдаётся асинхронно, пользователь уходит в настройки.
-    ///
-    /// Ключ ниже — буквальное значение `kAXTrustedCheckOptionPrompt` (см.
-    /// AXUIElement.h, стабильно с 10.9). Сама константа не используется:
-    /// ClangImporter даёт её как `var` (Unmanaged<CFString>!), и Swift 6 при
-    /// строгой конкурентности отказывается компилировать любое обращение к
-    /// ней — это чтение «разделяемого мутируемого состояния» (не Sendable,
-    /// не `let`). Обёртка через `nonisolated(unsafe)` не спасает: небезопасной
-    /// остаётся сама точка чтения импортированного глобального символа, а не
-    /// то, куда потом кладётся результат. Проверено эмпирически: typecheck
-    /// под `-swift-version 6 -strict-concurrency=complete` проходит, а сама
-    /// строка — ровно то, что печатает `kAXTrustedCheckOptionPrompt
-    /// .takeUnretainedValue() as String` при исполнении на этой машине.
     @discardableResult
     static func requestIfNeeded() -> Bool {
-        let options = ["AXTrustedCheckOptionPrompt": true]
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
         return AXIsProcessTrustedWithOptions(options as CFDictionary)
     }
 
