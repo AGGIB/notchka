@@ -119,4 +119,39 @@ public struct ClipboardRepository: Sendable {
     public func blobBytes() throws -> Int {
         try blobs.totalSize()
     }
+
+    /// Приводит историю к пределам политики. Возвращает число удалённых.
+    ///
+    /// Закреплённое не трогается никогда: пользователь закрепил его именно
+    /// затем, чтобы оно пережило ротацию.
+    @discardableResult
+    public func prune(policy: RetentionPolicy, now: Date = Date()) throws -> Int {
+        let candidates = try database.queue.read { db in
+            try ClipboardItem
+                .filter(Column("is_pinned") == false)
+                .order(Column("last_used_at").desc)
+                .fetchAll(db)
+        }
+
+        var doomed: [ClipboardItem] = []
+        var keptBlobBytes = 0
+
+        for (index, item) in candidates.enumerated() {
+            let tooMany = index >= policy.maxItems
+            let tooOld = now.timeIntervalSince(item.lastUsedAt) > policy.maxAge
+            let hasBlob = item.blobPath != nil
+            let overBudget = hasBlob && keptBlobBytes + item.byteSize > policy.maxBlobBytes
+
+            if tooMany || tooOld || overBudget {
+                doomed.append(item)
+            } else if hasBlob {
+                keptBlobBytes += item.byteSize
+            }
+        }
+
+        for item in doomed {
+            if let id = item.id { try delete(id: id) }
+        }
+        return doomed.count
+    }
 }
