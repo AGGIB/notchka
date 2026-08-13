@@ -348,7 +348,12 @@ private struct NotchRootView: View {
         NotchPanelView(
             state: controller.state,
             notchSize: notchSize,
-            accent: musicModel.accent
+            accent: musicModel.accent,
+            // Тот же путь, что и клавиатура: клик по колонке вкладок и
+            // ⌘1…⌘4/⇥ оба заканчиваются одним и тем же handle(.selectTab(_:))
+            // на контроллере (см. PanelKeyHandler → KeyBinding → NotchPanel
+            // .keyDown(with:) для клавиатурной стороны).
+            onSelectTab: { tab in controller.handle(.selectTab(tab)) }
         ) { tab in
             content(for: tab)
         }
@@ -369,9 +374,15 @@ private struct NotchRootView: View {
         }
     }
 
-    /// Вкладка музыки подключена по-настоящему; остальные три ждут своих
-    /// планов и по-прежнему показывают ту же заглушку, что и раньше —
+    /// Вкладка музыки подключена по-настоящему; буфер, заметки и пины ждут
+    /// своих планов и показывают общую заглушку (TabPlaceholderView) —
     /// оболочка не должна знать, что у них внутри.
+    ///
+    /// switch без default — намеренно. С default новый case NotchTab
+    /// молча провалился бы в заглушку без единой ошибки компиляции и без
+    /// падения теста: именно эта дыра описана в задаче про колонку вкладок.
+    /// Явные case делают то же самое надёжно — забытую вкладку поймает
+    /// компилятор, а не пользователь месяц спустя.
     @ViewBuilder
     private func content(for tab: NotchTab) -> some View {
         switch tab {
@@ -382,10 +393,8 @@ private struct NotchRootView: View {
                 artwork: musicModel.artwork,
                 accent: musicModel.accent
             ) { musicModel.togglePlayback() }
-        default:
-            Text(String(describing: tab))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+        case .clipboard, .notes, .pins:
+            TabPlaceholderView(tab: tab)
         }
     }
 }
