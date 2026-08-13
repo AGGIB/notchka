@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import GRDB
 @testable import NotchStore
 
 private func makeRepository() throws -> ClipboardRepository {
@@ -51,6 +52,41 @@ func imageIsStoredAsBlob() throws {
     #expect(item.blobPath != nil)
     #expect(item.byteSize == 512)
     #expect(try repository.data(for: item) == bytes)
+}
+
+@Test("вставленный из истории элемент поднимается наверх ленты")
+func touchPromotesItem() throws {
+    let repository = try makeRepository()
+    try repository.saveText("старое", source: nil, at: t0)
+    try repository.saveText("новое", source: nil, at: t0.addingTimeInterval(60))
+    let old = try #require(try repository.recent(limit: 10).last)
+
+    try repository.touch(id: try #require(old.id), at: t0.addingTimeInterval(120))
+    #expect(try repository.recent(limit: 10).map(\.textBody) == ["старое", "новое"])
+}
+
+@Test("удалённая запись исчезает и из полнотекстового индекса")
+func deleteClearsSearchIndex() throws {
+    let location = StoreLocation.temporary()
+    let database = try NotchDatabase(location: location)
+    try database.migrate()
+    let repository = ClipboardRepository(database: database, blobs: BlobStore(location: location))
+
+    func indexedRows() throws -> Int? {
+        try database.queue.read { db in
+            try Int.fetchOne(db, sql: "SELECT count(*) FROM search_index")
+        }
+    }
+
+    try repository.saveText("квитанция об оплате", source: nil, at: t0)
+    let item = try #require(try repository.recent(limit: 1).first)
+    #expect(try indexedRows() == 1)
+
+    try repository.delete(id: try #require(item.id))
+    // Индекс — вторая копия текста на диске. Пользователь, удаливший запись
+    // из истории, вправе рассчитывать, что она исчезла отовсюду, а не
+    // осталась лежать в поисковом индексе.
+    #expect(try indexedRows() == 0)
 }
 
 @Test("закрепление сохраняется")

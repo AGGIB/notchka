@@ -20,9 +20,14 @@ public struct BlobStore: Sendable {
     }
 
     /// Сохраняет данные и возвращает относительный путь.
+    ///
+    /// `hash` принимается снаружи, потому что вызывающий обычно уже посчитал
+    /// его для строки в базе. SHA-256 мегабайтного скриншота — не бесплатная
+    /// операция, и считать его дважды за одно копирование незачем. Не
+    /// передали — посчитаем сами.
     @discardableResult
-    public func store(_ data: Data) throws -> String {
-        let path = Self.relativePath(for: Self.hash(data))
+    public func store(_ data: Data, hash: String? = nil) throws -> String {
+        let path = Self.relativePath(for: hash ?? Self.hash(data))
         let url = location.blobsDirectory.appending(path: path)
         // Файл с таким именем — это ровно эти байты: содержимое и есть имя.
         // Перезаписывать незачем, и это экономит запись на каждый повтор.

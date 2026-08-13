@@ -228,8 +228,9 @@ public final class NotchDatabase: Sendable {
             // сэкономил бы место, но удалять из него можно только особой
             // командой по rowid, а строки индекса ведут на владельца парой
             // (owner_kind, owner_id) — по ней и удаляем в Task 4, обычным
-            // DELETE ... WHERE. Стоимость размена невелика: в индекс
-            // попадает только текст, картинки и файлы туда не идут.
+            // DELETE ... WHERE. Стоимость размена невелика: в индекс идёт
+            // только текстовая часть записи — сам текст либо имя файла.
+            // Байты картинок и файлов сюда не попадают.
             try db.create(virtualTable: "search_index", using: FTS5()) { t in
                 t.column("owner_kind").notIndexed()
                 t.column("owner_id").notIndexed()
@@ -880,14 +881,44 @@ public struct ClipboardRepository: Sendable {
         }
     }
 
+    /// Удаляет запись вместе с её блобом.
+    ///
+    /// Сначала строки, потом файл, и только после успешной транзакции.
+    /// Порядок неслучаен: удаление файла не откатывается вместе с SQL, и
+    /// при обратном порядке прерванная транзакция оставила бы запись,
+    /// ссылающуюся на несуществующий блоб, — то есть видимо сломанный
+    /// элемент в ленте. Осиротевший файл при том же сбое стоит места на
+    /// диске, но ничего не ломает; из двух исходов выбран второй.
     public func delete(id: Int64) throws {
-        try database.queue.write { db in
+        let blobPath = try database.queue.write { db in
             let item = try ClipboardItem.filter(Column("id") == id).fetchOne(db)
-            // Блоб удаляется вместе с записью: осиротевший файл не найдёт
-            // никто, а место он занимать продолжит.
-            if let path = item?.blobPath { try? blobs.remove(at: path) }
             try db.execute(sql: "DELETE FROM clipboard_items WHERE id = ?", arguments: [id])
             try db.execute(sql: "DELETE FROM search_index WHERE owner_kind = 'clipboard' AND owner_id = ?", arguments: [id])
+            return item?.blobPath
+        }
+
+        guard let blobPath else { return }
+        do {
+            try blobs.remove(at: blobPath)
+        } catch {
+            // Отсутствие файла BlobStore.remove гасит сам, так что сюда
+            // долетает только настоящий сбой — прав доступа или ввода-вывода.
+            // Молча проглотить его нельзя: запись уже удалена, файл остался
+            // навсегда, и без записи в журнале это никак не объяснимо.
+            logger.error("не удалось удалить блоб \(blobPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Поднимает запись наверх ленты, не меняя её содержимого.
+    ///
+    /// Нужен, когда пользователь вставляет старый элемент: он снова стал
+    /// актуальным и должен оказаться под рукой, а не там, где лежал.
+    public func touch(id: Int64, at now: Date = Date()) throws {
+        try database.queue.write { db in
+            try db.execute(
+                sql: "UPDATE clipboard_items SET last_used_at = ? WHERE id = ?",
+                arguments: [now, id]
+            )
         }
     }
 
@@ -1289,7 +1320,18 @@ enum PasteboardReader {
 Создай в app-таргете службу, которая раз в `PasteboardPoller.interval`
 на низкоприоритетной очереди спрашивает поллер, читает пастборд через
 `PasteboardReader`, прогоняет через `PrivacyFilter` и пишет в репозиторий.
-Неактивность бери из `CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .null)`.
+Неактивность бери из `CGEventSource.secondsSinceLastEventType`, но с
+правильной константой события:
+
+```swift
+// kCGAnyInputEventType — «любое событие ввода». Именованного случая в
+// CGEventType для неё нет, отсюда сырое значение.
+let anyInput = CGEventType(rawValue: ~0)!
+let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
+```
+
+Не `.null`: это нулевое событие, а не «любое», и время с последнего такого
+события не имеет отношения к тому, отошёл ли человек от машины.
 
 Чистку `prune` вызывай не на каждую запись, а раз в сутки и при запуске:
 проход по всей истории на каждое копирование — лишняя работа.
