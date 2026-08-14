@@ -26,6 +26,8 @@ targets:
         product: NotchStore
       - package: NotchKit
         product: ClipboardKit
+      - package: NotchKit
+        product: StashKit
     info:
       path: App/Info.plist
       properties:

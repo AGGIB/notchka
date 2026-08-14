@@ -5,6 +5,7 @@ import NotchUI
 import MediaBridge
 import NotchStore
 import ClipboardKit
+import StashKit
 import Dispatch
 import CoreGraphics
 import os
@@ -53,15 +54,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// инициализацией, как у `musicModel`: `NotchDatabase.init` и `migrate()`
     /// бросают (например, при нехватке места на диске), а отказ здесь не
     /// должен ронять всё приложение — чёлка и музыка вполне работают без
-    /// истории буфера. Поднимается в startClipboardService(), см. её doc.
+    /// истории буфера. Поднимается в startStorage(), см. её doc.
     private var clipboardService: ClipboardService?
 
     /// Репозиторий истории буфера — тот же экземпляр, что получает
     /// ClipboardService. Второе соединение с той же базой заводить незачем:
     /// DatabaseQueue сериализует доступ сам, поэтому один репозиторий вполне
     /// обслуживает и опрос пастборда, и вкладку буфера (см.
-    /// startClipboardService() и refreshNotchScreen()).
+    /// startStorage() и refreshNotchScreen()).
     private var clipboardRepository: ClipboardRepository?
+
+    /// Репозитории заметок и пинов — та же база, что и у буфера (общая
+    /// миграция v3-stash поверх v1/v2, см. NotchDatabase.migrate()).
+    /// Заводить отдельную NotchDatabase под них незачем по той же причине,
+    /// что и у clipboardRepository выше: DatabaseQueue сериализует доступ
+    /// сам, второе соединение с тем же файлом не даёт ничего, кроме риска.
+    private var notesRepository: NotesRepository?
+    private var snippetsRepository: SnippetsRepository?
 
     private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "AppDelegate")
 
@@ -76,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installTerminationHandling()
         musicModel.start()
-        startClipboardService()
+        startStorage()
         refreshNotchScreen()
 
         // Единственное уведомление AppKit, покрывающее сразу докинг/раздокинг
@@ -185,27 +194,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// так что двух хватает с запасом на планирование.
     private static let shutdownDeadline: TimeInterval = 2
 
-    /// Поднимает хранилище истории буфера и запускает слежение за
-    /// пастбордом (см. ClipboardService).
+    /// Открывает общую базу (буфер, заметки, пины — одна миграция на всех)
+    /// и запускает слежение за пастбордом (см. ClipboardService).
     ///
-    /// Отдельным методом, а не прямой инициализацией свойства, как у
+    /// Отдельным методом, а не прямой инициализацией свойств, как у
     /// musicModel: `NotchDatabase.init` и `migrate()` бросают, а брошенное
     /// внутри инициализатора хранимого свойства уронило бы весь процесс
     /// запуска приложения. Отказ здесь — не повод не показывать чёлку и не
-    /// играть музыку, поэтому ошибка только логируется, а служба остаётся
-    /// не запущенной.
-    private func startClipboardService() {
+    /// играть музыку, поэтому ошибка только логируется, а все три хранилища
+    /// остаются не поднятыми: вкладки буфера, заметок и пинов в этом случае
+    /// показывают заглушку вместо содержимого (см. content(for:) ниже).
+    private func startStorage() {
         do {
             let location = StoreLocation(bundleID: "kz.mobilefirst.notchka")
             let database = try NotchDatabase(location: location)
             try database.migrate()
+
             let repository = ClipboardRepository(database: database, blobs: BlobStore(location: location))
             let service = ClipboardService(repository: repository)
             service.start()
             clipboardService = service
             clipboardRepository = repository
+
+            notesRepository = NotesRepository(database: database)
+            snippetsRepository = SnippetsRepository(database: database)
         } catch {
-            Self.logger.error("не удалось поднять хранилище истории буфера: \(error, privacy: .public)")
+            Self.logger.error("не удалось поднять хранилище: \(error, privacy: .public)")
         }
     }
 
@@ -247,13 +261,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             screenFrame: screen.frame,
             panel: panel
         )
-        // Модель буфера строится один раз здесь же, вместе с контроллером —
-        // не в свойстве AppDelegate, как musicModel: репозиторий появляется
-        // позже, в startClipboardService(), а не в момент инициализации
-        // AppDelegate, так что готовый экземпляр musicModel-стиля завести
-        // нельзя. Дальше она живёт внутри NotchRootView ровно тот же срок,
-        // что и сам контроллер — повторные вызовы refreshNotchScreen() (смена
-        // экрана) сюда не доходят, см. ранний return выше.
+        // Модели буфера, заметок и пинов строятся один раз здесь же, вместе
+        // с контроллером — не в свойствах AppDelegate, как musicModel:
+        // репозитории появляются позже, в startStorage(), а не в момент
+        // инициализации AppDelegate, так что готовые экземпляры
+        // musicModel-стиля завести нельзя. Дальше они живут внутри
+        // NotchRootView ровно тот же срок, что и сам контроллер — повторные
+        // вызовы refreshNotchScreen() (смена экрана) сюда не доходят, см.
+        // ранний return выше.
         let clipboardModel = clipboardRepository.map { repository in
             ClipboardViewModel(repository: repository) { [weak self] in
                 // Служба помечает наше собственное изменение пастборда как
@@ -264,10 +279,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.clipboardService?.ignoreOwnPasteboardWrite()
             }
         }
+        let notesModel = notesRepository.map(NotesViewModel.init(repository:))
+        let pinsModel = snippetsRepository.map { repository in
+            PinsViewModel(repository: repository) { [weak self] in
+                // Тот же приём и то же обоснование, что у clipboardModel
+                // выше: без этой отметки опрос пастборда через доли секунды
+                // прочитал бы значение пина обратно и добавил бы его в
+                // историю буфера отдельной записью — открытым текстом, даже
+                // если пин помечен чувствительным.
+                self?.clipboardService?.ignoreOwnPasteboardWrite()
+            }
+        }
         panel.contentView = NSHostingView(
             rootView: NotchRootView(
                 controller: controller, notchSize: geometry.notchRect.size,
-                musicModel: musicModel, clipboardModel: clipboardModel
+                musicModel: musicModel, clipboardModel: clipboardModel,
+                notesModel: notesModel, pinsModel: pinsModel
             )
         )
         controller.start()
@@ -363,11 +390,12 @@ private struct NotchRootView: View {
     let controller: NotchController
     let notchSize: CGSize
     let musicModel: MusicViewModel
-    /// `nil`, когда startClipboardService() не смог поднять хранилище (см.
-    /// её doc в AppDelegate) — вкладка буфера в этом случае показывает
-    /// TabPlaceholderView вместо ленты, тем же путём, что и ещё не
-    /// подключённые заметки и пины.
+    /// `nil` у любой из трёх моделей ниже означает одно и то же: startStorage()
+    /// не смог поднять хранилище (см. её doc в AppDelegate) — соответствующая
+    /// вкладка в этом случае показывает TabPlaceholderView вместо содержимого.
     let clipboardModel: ClipboardViewModel?
+    let notesModel: NotesViewModel?
+    let pinsModel: PinsViewModel?
 
     /// Разрешение Accessibility, прочитанное на момент последней проверки.
     /// AXIsProcessTrusted() не даёт уведомлений о своей выдаче, поэтому само
@@ -395,6 +423,18 @@ private struct NotchRootView: View {
     /// историю при своём открытии, а не при любом раскрытии панели.
     private var isClipboardTabActive: Bool {
         if case .expanded(.clipboard) = controller.state { return true }
+        return false
+    }
+
+    /// Тот же принцип, что у isClipboardTabActive выше: заметки и пины
+    /// читаются заново при своём открытии, а не при любом раскрытии панели.
+    private var isNotesTabActive: Bool {
+        if case .expanded(.notes) = controller.state { return true }
+        return false
+    }
+
+    private var isPinsTabActive: Bool {
+        if case .expanded(.pins) = controller.state { return true }
         return false
     }
 
@@ -459,6 +499,17 @@ private struct NotchRootView: View {
             guard isClipboardTabActive, let clipboardModel else { return }
             await clipboardModel.refresh()
         }
+        .task(id: isNotesTabActive) {
+            // Тот же приём, что у буфера выше: не тикающий, читается один
+            // раз при открытии вкладки, .task(id:) перезапускает блок при
+            // каждом новом открытии.
+            guard isNotesTabActive, let notesModel else { return }
+            await notesModel.refresh()
+        }
+        .task(id: isPinsTabActive) {
+            guard isPinsTabActive, let pinsModel else { return }
+            await pinsModel.refresh()
+        }
         .task(id: isClipboardTabActive) {
             // Тикающий цикл, в отличие от refresh() выше, — и здесь это
             // обязательно, а не выбор стиля: уход курсора из раскрытой
@@ -484,9 +535,9 @@ private struct NotchRootView: View {
         }
     }
 
-    /// Вкладки музыки и буфера подключены по-настоящему; заметки и пины
-    /// ждут своих планов и показывают общую заглушку (TabPlaceholderView) —
-    /// оболочка не должна знать, что у них внутри.
+    /// Все четыре вкладки подключены по-настоящему — заглушка остаётся
+    /// только на случай отказа хранилища (см. её ветки ниже), не как place-
+    /// holder на будущее.
     ///
     /// switch без default — намеренно. С default новый case NotchTab
     /// молча провалился бы в заглушку без единой ошибки компиляции и без
@@ -510,14 +561,53 @@ private struct NotchRootView: View {
             if let clipboardModel {
                 clipboardContent(model: clipboardModel)
             } else {
-                // Вкладка готова, но хранилище не открылось (см.
-                // startClipboardService). «Скоро появится» здесь было бы
-                // неправдой о причине.
+                // Вкладка готова, но хранилище не открылось (см. startStorage).
+                // «Скоро появится» здесь было бы неправдой о причине.
                 TabPlaceholderView(tab: tab, message: "Хранилище недоступно")
             }
-        case .notes, .pins:
-            TabPlaceholderView(tab: tab)
+        case .notes:
+            if let notesModel {
+                notesContent(model: notesModel)
+            } else {
+                TabPlaceholderView(tab: tab, message: "Хранилище недоступно")
+            }
+        case .pins:
+            if let pinsModel {
+                pinsContent(model: pinsModel)
+            } else {
+                TabPlaceholderView(tab: tab, message: "Хранилище недоступно")
+            }
         }
+    }
+
+    /// Двусторонний биндинг черновика собран вручную, а не через
+    /// `@Bindable`: `notesModel` в этой вьюхе — константа (`let`), но это
+    /// ссылка на класс, и запись в `draft` через замыкание `set` меняет то
+    /// же самое живое состояние модели, которое читает `get`.
+    private func notesContent(model: NotesViewModel) -> some View {
+        NotesTabView(
+            rows: model.rows,
+            draft: Binding(get: { model.draft }, set: { model.draft = $0 }),
+            accent: musicModel.accent,
+            onSave: { model.saveDraft() },
+            onCommitEdit: { id, body in model.commitEdit(id: id, body: body) },
+            onDelete: { id in model.delete(id: id) }
+        )
+    }
+
+    private func pinsContent(model: PinsViewModel) -> some View {
+        PinsTabView(
+            chips: model.chips,
+            onActivate: { id in
+                // pasteTarget, а не захват при развороте — та же причина,
+                // что у clipboardContent ниже: между разворотом и кликом
+                // пользователь успевает сменить активное приложение.
+                model.activate(id: id, frontmostApplication: controller.pasteTarget)
+            },
+            onCopyOnly: { id in model.copyOnly(id: id) },
+            onReorder: { id, newIndex in model.reorder(id: id, to: newIndex) },
+            onEdit: { chip in model.save(chip) }
+        )
     }
 
     /// Лента или объяснение про разрешение — что из двух, решает чистая
