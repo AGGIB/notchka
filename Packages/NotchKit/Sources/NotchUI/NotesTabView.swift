@@ -219,6 +219,13 @@ private struct NoteComposerView: View {
             // поверх чёрной панели — на «Обсидиане» это выглядело бы дырой.
             .scrollContentBackground(.hidden)
             .frame(height: Self.fieldHeight)
+            // TextEditor на macOS — известный баг SwiftUI: заданная .frame
+            // высота ограничивает то, что о размере узнаёт родитель, но не
+            // то, что реально рисуется — сама NSScrollView внутри может
+            // отрисоваться на полный размер содержимого поверх границ.
+            // Без .clipped() поле растягивалось на всю доступную высоту
+            // вкладки, а не на положенные 40 pt.
+            .clipped()
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
                     Text("Новая заметка…")
@@ -347,6 +354,10 @@ private struct NoteRowView: View {
                 .foregroundStyle(.white.opacity(0.9))
                 .scrollContentBackground(.hidden)
                 .frame(height: Self.editorHeight)
+                // Тот же баг TextEditor, что и у поля создания выше (см.
+                // её doc в NoteComposerView.field) — без .clipped() этот
+                // редактор разросся бы точно так же при первом раскрытии.
+                .clipped()
                 .accessibilityLabel("Текст заметки")
             editorActions
         }
