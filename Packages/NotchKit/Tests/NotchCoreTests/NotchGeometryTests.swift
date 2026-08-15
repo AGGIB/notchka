@@ -2,7 +2,7 @@ import Testing
 import CoreGraphics
 @testable import NotchCore
 
-/// Метрики, близкие к MacBook Pro 14": ширина 1512, чёлка 252 pt по 630 с каждой стороны.
+/// Metrics close to a MacBook Pro 14": width 1512, notch 252 pt with 630 on each side.
 private let notchedScreen = ScreenMetrics(
     frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
     safeAreaTopInset: 32,
@@ -10,7 +10,7 @@ private let notchedScreen = ScreenMetrics(
     auxiliaryTopRightWidth: 630
 )
 
-@Test("на экране с чёлкой вырез считается из боковых областей")
+@Test("On a screen with a notch, the cutout is derived from the auxiliary areas")
 func notchRectIsDerivedFromAuxiliaryAreas() throws {
     let geometry = try #require(NotchGeometryCalculator.geometry(for: notchedScreen))
     #expect(geometry.notchRect.origin.x == 630)
@@ -19,7 +19,7 @@ func notchRectIsDerivedFromAuxiliaryAreas() throws {
     #expect(geometry.notchRect.height == 32)
 }
 
-@Test("горячая зона шире выреза на 6 pt с каждой стороны и на 4 pt ниже")
+@Test("The hot zone is wider than the notch by 6 pt on each side and 4 pt below")
 func hotZoneIsInflatedNotch() throws {
     let geometry = try #require(NotchGeometryCalculator.geometry(for: notchedScreen))
     #expect(geometry.hotZone.origin.x == 624)
@@ -27,7 +27,7 @@ func hotZoneIsInflatedNotch() throws {
     #expect(geometry.hotZone.height == 36)
 }
 
-@Test("на экране без чёлки геометрии нет")
+@Test("A screen without a notch has no geometry")
 func screenWithoutNotchHasNoGeometry() {
     let external = ScreenMetrics(
         frame: CGRect(x: 0, y: 0, width: 2560, height: 1440),
@@ -38,7 +38,7 @@ func screenWithoutNotchHasNoGeometry() {
     #expect(NotchGeometryCalculator.geometry(for: external) == nil)
 }
 
-@Test("некорректные боковые области не дают отрицательной чёлки")
+@Test("Inconsistent auxiliary areas do not produce a negative notch")
 func inconsistentAuxiliaryAreasAreRejected() {
     let broken = ScreenMetrics(
         frame: CGRect(x: 0, y: 0, width: 1000, height: 700),
@@ -49,13 +49,13 @@ func inconsistentAuxiliaryAreasAreRejected() {
     #expect(NotchGeometryCalculator.geometry(for: broken) == nil)
 }
 
-@Test("нулевые боковые области при заявленной чёлке не дают вырез во весь экран")
+@Test("Zero auxiliary areas with a claimed notch do not produce a full-screen cutout")
 func zeroAuxiliaryAreasAreRejectedDespiteNotch() {
-    // Воспроизводит то, что раньше отдавал ScreenMetricsReader при nil с обеих
-    // сторон: safeAreaTopInset > 0 (чёлка есть), но боковые области нулевые.
-    // notchWidth тогда честно вычислился бы как frame.width — калькулятор
-    // обязан отказать здесь сам, не полагаясь на то, что вызывающая сторона
-    // никогда не передаст такие метрики.
+    // Reproduces what ScreenMetricsReader used to return when both sides were
+    // nil: safeAreaTopInset > 0 (there is a notch), but the auxiliary areas
+    // are zero. notchWidth would then honestly compute as frame.width — the
+    // calculator must reject this itself, not rely on the caller never
+    // passing such metrics.
     let degenerate = ScreenMetrics(
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
         safeAreaTopInset: 32,
@@ -65,9 +65,9 @@ func zeroAuxiliaryAreasAreRejectedDespiteNotch() {
     #expect(NotchGeometryCalculator.geometry(for: degenerate) == nil)
 }
 
-@Test("одна нулевая боковая область при заявленной чёлке тоже отклоняется")
+@Test("A single zero auxiliary area with a claimed notch is also rejected")
 func singleZeroAuxiliaryAreaIsRejected() {
-    // Ассиметричный вариант той же деградации: только один nil у AppKit.
+    // Asymmetric variant of the same degradation: only one nil from AppKit.
     let halfDegenerate = ScreenMetrics(
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
         safeAreaTopInset: 32,

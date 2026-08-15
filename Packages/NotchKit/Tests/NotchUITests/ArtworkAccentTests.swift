@@ -2,7 +2,7 @@ import Testing
 import CoreGraphics
 @testable import NotchUI
 
-/// Одноцветная картинка 8×8 заданного цвета.
+/// A solid-color 8×8 image of a given color.
 private func solidImage(red: Double, green: Double, blue: Double) -> CGImage {
     let width = 8, height = 8
     let space = CGColorSpaceCreateDeviceRGB()
@@ -16,19 +16,19 @@ private func solidImage(red: Double, green: Double, blue: Double) -> CGImage {
     return context.makeImage()!
 }
 
-@Test("тусклый цвет поднимается до читаемого на чёрном")
+@Test("a dim color is brightened to readable on black")
 func dimColourIsBrightened() {
     let corrected = ArtworkAccent.readable((h: 0.6, s: 0.5, b: 0.05))
     #expect(corrected.b >= ArtworkAccent.minBrightness)
 }
 
-@Test("блёклый цвет получает насыщенность, иначе сольётся с серым")
+@Test("a washed-out color gains saturation, otherwise it blends into gray")
 func washedColourGainsSaturation() {
     let corrected = ArtworkAccent.readable((h: 0.1, s: 0.02, b: 0.8))
     #expect(corrected.s >= ArtworkAccent.minSaturation)
 }
 
-@Test("уже читаемый цвет не искажается")
+@Test("an already readable color is left unchanged")
 func readableColourIsLeftAlone() {
     let input = (h: 0.9, s: 0.7, b: 0.8)
     let corrected = ArtworkAccent.readable(input)
@@ -37,18 +37,18 @@ func readableColourIsLeftAlone() {
     #expect(abs(corrected.b - input.b) < 0.0001)
 }
 
-@Test("оттенок сохраняется при коррекции — цвет остаётся «тем же»")
+@Test("hue is preserved during correction — the color stays \"the same\"")
 func hueSurvivesCorrection() {
     let corrected = ArtworkAccent.readable((h: 0.33, s: 0.01, b: 0.02))
     #expect(abs(corrected.h - 0.33) < 0.0001)
 }
 
-@Test("из одноцветной обложки извлекается цвет")
+@Test("a color is extracted from solid-color artwork")
 func solidArtworkYieldsColour() {
     #expect(ArtworkAccent.color(from: solidImage(red: 0.9, green: 0.2, blue: 0.5)) != nil)
 }
 
-@Test("чёрная обложка тоже даёт читаемый цвет, а не чёрный на чёрном")
+@Test("black artwork also yields a readable color, not black-on-black")
 func blackArtworkStillReadable() throws {
     let colour = try #require(ArtworkAccent.hsb(from: solidImage(red: 0, green: 0, blue: 0)))
     let corrected = ArtworkAccent.readable(colour)

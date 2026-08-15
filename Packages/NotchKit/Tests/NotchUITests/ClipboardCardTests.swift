@@ -1,29 +1,29 @@
 import Testing
 @testable import NotchUI
 
-@Test("длинный текст обрезается с многоточием")
+@Test("long text is truncated with an ellipsis")
 func longTextIsTruncated() {
-    let preview = ClipboardCard.preview(for: String(repeating: "а", count: 200), maxLength: 40)
+    let preview = ClipboardCard.preview(for: String(repeating: "a", count: 200), maxLength: 40)
     #expect(preview.count <= 41)
     #expect(preview.hasSuffix("…"))
 }
 
-@Test("короткий текст не трогается")
+@Test("short text is left unchanged")
 func shortTextIsUnchanged() {
-    #expect(ClipboardCard.preview(for: "коротко", maxLength: 40) == "коротко")
+    #expect(ClipboardCard.preview(for: "short", maxLength: 40) == "short")
 }
 
-@Test("переводы строк схлопываются — карточка в одну-две строки высотой")
+@Test("newlines collapse — card stays one to two lines tall")
 func newlinesAreCollapsed() {
-    #expect(ClipboardCard.preview(for: "первая\nвторая\n\nтретья", maxLength: 40) == "первая вторая третья")
+    #expect(ClipboardCard.preview(for: "first\nsecond\n\nthird", maxLength: 40) == "first second third")
 }
 
-@Test("ведущие и хвостовые пробелы убираются")
+@Test("leading and trailing whitespace is trimmed")
 func whitespaceIsTrimmed() {
-    #expect(ClipboardCard.preview(for: "   текст   ", maxLength: 40) == "текст")
+    #expect(ClipboardCard.preview(for: "   text   ", maxLength: 40) == "text")
 }
 
-@Test("пустой текст даёт пустое превью, а не многоточие")
+@Test("empty text yields an empty preview, not an ellipsis")
 func emptyStaysEmpty() {
     #expect(ClipboardCard.preview(for: "   ", maxLength: 40) == "")
 }

@@ -5,36 +5,37 @@ import NotchUI
 import StashKit
 import os
 
-/// Модель вкладки пинов.
+/// Pins tab view model.
 ///
-/// Как и ClipboardViewModel (см. её doc), не держит постоянной подписки на
-/// базу — список читается заново при каждом открытии вкладки через
-/// `refresh()`, вызываемый из NotchRootView.task(id:) тем же приёмом, что и
-/// у буфера и позиции трека (решение №4 постановки задачи).
+/// Like ClipboardViewModel (see its doc), doesn't hold a persistent
+/// subscription to the database — the list is re-read every time the tab
+/// opens via `refresh()`, called from NotchRootView.task(id:) using the same
+/// approach as the clipboard and track position (decision #4 of the spec).
 @MainActor
 @Observable
 final class PinsViewModel {
     private(set) var chips: [PinChip] = []
 
     @ObservationIgnored private let repository: SnippetsRepository
-    /// Полные записи по id: PinChip несёт только то, что нужно для показа и
-    /// вставки, а `SnippetsRepository.update(_:)` требует ещё `sortOrder` и
-    /// `createdAt`, которых в чипе нет вовсе, — они берутся отсюда.
+    /// Full records by id: PinChip only carries what's needed for display and
+    /// insertion, while `SnippetsRepository.update(_:)` also requires
+    /// `sortOrder` and `createdAt`, which the chip doesn't have at all — those
+    /// come from here.
     @ObservationIgnored private var snippetsByID: [Int64: Snippet] = [:]
 
-    // nonisolated: без этого статический logger унаследовал бы MainActor-
-    // изоляцию класса и был бы недоступен из nonisolated-функций ниже,
-    // которые сознательно уводят обращения к базе с главного потока — тот
-    // же приём и то же обоснование, что у ClipboardViewModel.logger.
+    // nonisolated: without this the static logger would inherit the class's
+    // MainActor isolation and be unreachable from the nonisolated functions
+    // below, which deliberately move database access off the main thread — the
+    // same approach and rationale as ClipboardViewModel.logger.
     nonisolated private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "pins-tab")
 
-    /// Зовётся сразу после того, как модель положила значение пина в
-    /// пастборд. Тот же приём и то же обоснование, что у
-    /// `ClipboardViewModel.didWritePasteboard`: без него опрос буфера через
-    /// доли секунды прочитал бы вставленное значение обратно и добавил бы
-    /// его в историю буфера отдельной записью — открытым текстом, даже если
-    /// пин был помечен чувствительным. Маскировка в панели пинов не спасла
-    /// бы в этом случае: лента буфера показывает содержимое без маски.
+    /// Called right after the model has put the pin's value on the
+    /// pasteboard. Same approach and rationale as
+    /// `ClipboardViewModel.didWritePasteboard`: without it, clipboard polling a
+    /// fraction of a second later would read the pasted value back and add it
+    /// to the clipboard history as a separate entry — in plain text, even if
+    /// the pin was marked sensitive. Masking in the pins panel wouldn't help in
+    /// this case: the clipboard feed shows content without a mask.
     @ObservationIgnored private let didWritePasteboard: () -> Void
 
     init(repository: SnippetsRepository, didWritePasteboard: @escaping () -> Void = {}) {
@@ -42,35 +43,35 @@ final class PinsViewModel {
         self.didWritePasteboard = didWritePasteboard
     }
 
-    /// Перечитывает список пинов. Вызывать при каждом открытии вкладки —
-    /// модель не держит постоянной подписки на базу (см. doc класса).
+    /// Re-reads the pin list. Call on every tab open — the model doesn't
+    /// hold a persistent subscription to the database (see class doc).
     func refresh() async {
         let repository = repository
         let snippets = await Self.loadAll(repository: repository)
         apply(snippets)
     }
 
-    /// Клик по чипу: вставляет настоящее значение, а не маску (решение №1
-    /// постановки). `frontmostApplication` читается снаружи в момент клика,
-    /// а не захватывается при развороте — см. `NotchController.pasteTarget`
-    /// и её doc про то, почему это важно именно в момент клика.
+    /// Chip click: inserts the real value, not the mask (decision #1 of
+    /// the spec). `frontmostApplication` is read from outside at the moment
+    /// of the click, not captured on expand — see `NotchController.pasteTarget`
+    /// and its doc on why that matters specifically at click time.
     func activate(id: Int64, frontmostApplication: NSRunningApplication?) {
         guard let snippet = snippetsByID[id] else { return }
         PasteService.paste(snippet.value, into: frontmostApplication)
         didWritePasteboard()
     }
 
-    /// ⌥клик: только копирование, тем же настоящим значением.
+    /// ⌥-click: copy only, using the same real value.
     func copyOnly(id: Int64) {
         guard let snippet = snippetsByID[id] else { return }
         PasteService.copyOnly(snippet.value)
         didWritePasteboard()
     }
 
-    /// Перетаскивание чипа на новую позицию — решение №2 постановки: зовёт
-    /// `move(id:to:)` и тут же перечитывает список, чтобы новый порядок был
-    /// виден сразу, в той же открытой панели, а не только при следующем
-    /// открытии вкладки.
+    /// Dragging a chip to a new position — decision #2 of the spec: calls
+    /// `move(id:to:)` and immediately re-reads the list so the new order is
+    /// visible right away, in the same open panel, not only on the next tab
+    /// open.
     func reorder(id: Int64, to newIndex: Int) {
         let repository = repository
         Task(priority: .utility) {
@@ -79,8 +80,8 @@ final class PinsViewModel {
         }
     }
 
-    /// Сохраняет пин из формы PinsTabView: новый, если `chip.id` пуст, иначе
-    /// правит существующую запись, найденную по этому id.
+    /// Saves a pin from the PinsTabView form: a new one if `chip.id` is
+    /// empty, otherwise edits the existing record found by that id.
     func save(_ chip: PinChip) {
         let repository = repository
         let existing = chip.id.flatMap { snippetsByID[$0] }
@@ -90,15 +91,15 @@ final class PinsViewModel {
         }
     }
 
-    /// Строит чипы из уже прочитанного списка — на главном потоке, тем же
-    /// приёмом, что и `ClipboardViewModel.apply(_:)`.
+    /// Builds chips from an already-read list — on the main thread, using
+    /// the same approach as `ClipboardViewModel.apply(_:)`.
     private func apply(_ snippets: [Snippet]) {
         var byID: [Int64: Snippet] = [:]
         var built: [PinChip] = []
         built.reserveCapacity(snippets.count)
         for snippet in snippets {
             guard let id = snippet.id else {
-                Self.logger.error("пин без id пропущен при построении списка")
+                Self.logger.error("pin without id skipped while building the list")
                 continue
             }
             byID[id] = snippet
@@ -115,7 +116,7 @@ final class PinsViewModel {
         do {
             return try repository.all()
         } catch {
-            logger.error("не удалось прочитать список пинов: \(error, privacy: .public)")
+            logger.error("failed to read pin list: \(error, privacy: .public)")
             return []
         }
     }
@@ -126,17 +127,17 @@ final class PinsViewModel {
         do {
             try repository.move(id: id, to: newIndex)
         } catch {
-            logger.error("не удалось переместить пин \(id, privacy: .public): \(error, privacy: .public)")
+            logger.error("failed to move pin \(id, privacy: .public): \(error, privacy: .public)")
         }
         return await loadAll(repository: repository)
     }
 
-    /// Правит существующую запись или добавляет новую в зависимости от
-    /// того, нашёлся ли `existing` — его ищет `save(_:)` до входа сюда, пока
-    /// ещё есть доступ к `snippetsByID` на главном потоке. `update(_:)`
-    /// внутри `SnippetsRepository` не решает это сама: она ожидает уже
-    /// собранный `Snippet` целиком, включая `sortOrder` и `createdAt`,
-    /// которых форма никогда не видит.
+    /// Edits the existing record or adds a new one depending on whether
+    /// `existing` was found — `save(_:)` looks it up before entering here,
+    /// while `snippetsByID` is still accessible on the main thread.
+    /// `update(_:)` inside `SnippetsRepository` doesn't decide this itself: it
+    /// expects an already-assembled `Snippet` in full, including `sortOrder`
+    /// and `createdAt`, which the form never sees.
     nonisolated private static func persistAndFetch(
         repository: SnippetsRepository, chip: PinChip, existing: Snippet?
     ) async -> [Snippet] {
@@ -155,7 +156,7 @@ final class PinsViewModel {
                 )
             }
         } catch {
-            logger.error("не удалось сохранить пин: \(error, privacy: .public)")
+            logger.error("failed to save pin: \(error, privacy: .public)")
         }
         return await loadAll(repository: repository)
     }

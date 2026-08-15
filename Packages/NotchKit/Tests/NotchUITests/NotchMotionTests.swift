@@ -3,7 +3,7 @@ import SwiftUI
 import NotchCore
 @testable import NotchUI
 
-@Test("открытие и разворот идут упругой пружиной")
+@Test("opening and expanding use a bouncy spring")
 func openingUsesSpring() {
     let opening = NotchMotion.animation(for: .peek(.hover), reduceMotion: false)
     #expect(opening == .spring(response: 0.34, dampingFraction: 0.68))
@@ -12,13 +12,13 @@ func openingUsesSpring() {
     #expect(expanding == .spring(response: 0.34, dampingFraction: 0.68))
 }
 
-@Test("закрытие быстрее открытия")
+@Test("closing is faster than opening")
 func closingIsSnappy() {
     #expect(NotchMotion.animation(for: .closed, reduceMotion: false)
             == .snappy(duration: 0.26))
 }
 
-@Test("при Reduce Motion пружина заменяется линейным затуханием")
+@Test("reduce motion replaces the spring with a linear ease")
 func reduceMotionReplacesSpring() {
     let reduced = NotchMotion.animation(for: .expanded(.music), reduceMotion: true)
     #expect(reduced == .easeInOut(duration: 0.18))

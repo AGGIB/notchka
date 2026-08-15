@@ -1,25 +1,25 @@
 import Foundation
 
-/// Сырое положение курсора превращает в события входа и выхода с пороговой фильтрацией.
-/// Время приходит параметром (не читается из часов) — поэтому тесты не дожидаются ни миллисекунды.
+/// Turns raw cursor position into enter/exit events with threshold filtering.
+/// Time is passed as a parameter (not read from the clock) — so tests don't wait a single millisecond.
 public struct HoverDebouncer: Sendable {
-    /// Минимальное время пребывания курсора в зоне для открытия панели.
+    /// Minimum time the cursor must stay inside the zone to open the panel.
     public static let enterDwell: TimeInterval = 0.120
-    /// Минимальное время пребывания курсора вне зоны для закрытия панели.
+    /// Minimum time the cursor must stay outside the zone to close the panel.
     public static let exitGrace: TimeInterval = 0.250
 
-    /// Текущее положение курсора; расхождение с `reported` — это ожидающий переход.
+    /// Current cursor position; a mismatch with `reported` is a pending transition.
     private var isInside = false
-    /// Положение, о котором уже сообщили наружу.
-    /// Инвариант: выход испускается только если было сообщено о входе.
+    /// The position already reported externally.
+    /// Invariant: exit is only emitted if entry was already reported.
     private var reported = false
-    /// Отсчёт порога; не обновляется при движении в ту же сторону.
+    /// Threshold timer start; not updated on movement in the same direction.
     private var changedAt: Date?
 
     public init() {}
 
-    /// Ожидается ли переход, который должен сработать по истечении порога.
-    /// Пока ложь, таймер можно не запускать — приложение находится в простое.
+    /// Whether a transition is pending that should fire once the threshold elapses.
+    /// While false, the timer doesn't need to run — the app is idle.
     public var hasPendingTransition: Bool { isInside != reported }
 
     @discardableResult
@@ -31,8 +31,8 @@ public struct HoverDebouncer: Sendable {
         return evaluate(at: now)
     }
 
-    /// Проверка пороговых условий по таймеру.
-    /// Нужна, чтобы пороги срабатывали и при замерзшем курсоре.
+    /// Checks threshold conditions on a timer tick.
+    /// Needed so thresholds still fire even when the cursor is frozen.
     @discardableResult
     public mutating func tick(at now: Date) -> NotchEvent? {
         evaluate(at: now)

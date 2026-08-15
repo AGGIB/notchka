@@ -4,20 +4,21 @@ import NotchUI
 import StashKit
 import os
 
-/// Модель вкладки быстрых заметок.
+/// Model for the quick notes tab.
 ///
-/// В отличие от ClipboardViewModel не уводит чтение и запись с MainActor в
-/// фоновую задачу: заметки — короткий пользовательский текст без блобов, и
-/// синхронный вызов GRDB на них не рискует подвесить панель, в отличие от
-/// мегабайтных скриншотов истории буфера, ради которых там заведена вся
-/// асинхронная машинерия. Здесь она была бы сложностью без пользы.
+/// Unlike ClipboardViewModel, this does not move reads and writes off
+/// MainActor into a background task: notes are short user text with no
+/// blobs, and a synchronous GRDB call on them doesn't risk hanging the
+/// panel, unlike the megabyte-sized clipboard history screenshots that
+/// justify all the async machinery there. Here it would just be
+/// complexity with no benefit.
 @MainActor
 @Observable
 final class NotesViewModel {
     private(set) var rows: [NoteRow] = []
-    /// Текст поля создания новой заметки — двусторонний биндинг с
-    /// `NotesTabView.draft` со стороны вызывающего (см. отчёт задачи о
-    /// подключении в AppDelegate).
+    /// Text of the new-note composer field — a two-way binding with
+    /// `NotesTabView.draft` on the caller's side (see the task report on
+    /// wiring it up in AppDelegate).
     var draft: String = ""
 
     @ObservationIgnored private let repository: NotesRepository
@@ -28,61 +29,62 @@ final class NotesViewModel {
         self.repository = repository
     }
 
-    /// Перечитывает список. Вызывать при каждом открытии вкладки — модель не
-    /// держит постоянной подписки на базу (то же решение, что у
-    /// ClipboardViewModel.refresh(), вызываемого из NotchRootView.task(id:)).
+    /// Rereads the list. Call this every time the tab opens — the model does
+    /// not keep a persistent subscription to the database (the same choice
+    /// made by ClipboardViewModel.refresh(), called from
+    /// NotchRootView.task(id:)).
     ///
-    /// Сигнатура `async`, хотя тело синхронно (см. doc класса) — форма
-    /// вызова из `.task(id:)` в NotchRootView не должна отличаться между
-    /// вкладками буфера и заметок.
+    /// The signature is `async` even though the body is synchronous (see the
+    /// class doc) — the call shape from `.task(id:)` in NotchRootView must
+    /// not differ between the clipboard and notes tabs.
     func refresh() async {
         reload()
     }
 
-    /// Сохраняет черновик как новую заметку.
+    /// Saves the draft as a new note.
     ///
-    /// Пустой текст не должен долетать до репозитория — кнопка сохранения и
-    /// её сочетание `⌘↩` недоступны на пустом поле (см.
-    /// NotesTabView.NoteComposerView.isSaveDisabled). `catch` ниже — вторая
-    /// линия защиты на случай гонки, а не основной путь: черновик НЕ
-    /// очищается при отказе, чтобы пользователь видел, что сохранение не
-    /// произошло, а не потерял набранный текст молча.
+    /// Empty text should never reach the repository — the save button and
+    /// its `⌘↩` shortcut are disabled on an empty field (see
+    /// NotesTabView.NoteComposerView.isSaveDisabled). The `catch` below is a
+    /// second line of defense for a race, not the main path: the draft is
+    /// NOT cleared on failure, so the user can see that saving didn't
+    /// happen instead of silently losing the typed text.
     func saveDraft() {
         do {
             try repository.add(draft)
             draft = ""
             reload()
         } catch is NotesRepository.EmptyBodyError {
-            Self.logger.notice("сохранение пустой заметки отклонено")
+            Self.logger.notice("rejected saving an empty note")
         } catch {
-            Self.logger.error("не удалось сохранить заметку: \(error, privacy: .public)")
+            Self.logger.error("failed to save note: \(error, privacy: .public)")
         }
     }
 
-    /// Сохраняет правку существующей заметки. Инлайн-редактор в
-    /// NotesTabView.NoteRowView остаётся открытым при отказе — по той же
-    /// причине, что и у saveDraft: стереть весь текст и подтвердить не
-    /// значит «удалить заметку», для этого есть отдельная кнопка корзины.
+    /// Saves an edit to an existing note. The inline editor in
+    /// NotesTabView.NoteRowView stays open on failure — for the same reason
+    /// as saveDraft: clearing all the text and confirming doesn't mean
+    /// "delete the note", there's a separate trash button for that.
     func commitEdit(id: Int64, body: String) {
         do {
             try repository.update(id: id, body: body)
             reload()
         } catch is NotesRepository.EmptyBodyError {
-            Self.logger.notice("сохранение пустой правки заметки \(id, privacy: .public) отклонено")
+            Self.logger.notice("rejected saving an empty edit for note \(id, privacy: .public)")
         } catch {
-            Self.logger.error("не удалось сохранить правку заметки \(id, privacy: .public): \(error, privacy: .public)")
+            Self.logger.error("failed to save edit for note \(id, privacy: .public): \(error, privacy: .public)")
         }
     }
 
-    /// Удаляет заметку. Пустой catch намеренно отсутствует — отказ здесь не
-    /// имеет отдельной пользовательской реакции (нет «поля», которое нужно
-    /// было бы не очищать), только лог.
+    /// Deletes a note. There is deliberately no empty catch — a failure here
+    /// has no separate user-facing reaction (there's no "field" that needs
+    /// to be left uncleared), just a log entry.
     func delete(id: Int64) {
         do {
             try repository.delete(id: id)
             reload()
         } catch {
-            Self.logger.error("не удалось удалить заметку \(id, privacy: .public): \(error, privacy: .public)")
+            Self.logger.error("failed to delete note \(id, privacy: .public): \(error, privacy: .public)")
         }
     }
 
@@ -90,18 +92,18 @@ final class NotesViewModel {
         do {
             rows = try repository.all().compactMap(Self.makeRow)
         } catch {
-            Self.logger.error("не удалось прочитать заметки: \(error, privacy: .public)")
+            Self.logger.error("failed to read notes: \(error, privacy: .public)")
             rows = []
         }
     }
 
-    /// Подпись даты считается от `createdAt`, не `updatedAt` — см. doc
-    /// `NoteRow` в NotchUI: список отсортирован по времени создания
-    /// (NotesRepository.all()), и подпись обязана согласовываться с этим
-    /// порядком.
+    /// The date caption is computed from `createdAt`, not `updatedAt` — see
+    /// the `NoteRow` doc in NotchUI: the list is sorted by creation time
+    /// (NotesRepository.all()), and the caption must stay consistent with
+    /// that order.
     private static func makeRow(_ note: Note) -> NoteRow? {
         guard let id = note.id else {
-            logger.error("заметка без id пропущена при построении списка")
+            logger.error("note without an id skipped when building the list")
             return nil
         }
         return NoteRow(id: id, body: note.body, relativeDate: NoteFormatting.relativeDate(note.createdAt))

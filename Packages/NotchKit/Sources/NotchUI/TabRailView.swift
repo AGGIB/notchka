@@ -1,18 +1,18 @@
 import SwiftUI
 import NotchCore
 
-/// Иконка и подпись вкладки для колонки переключения и для заглушки.
+/// Tab icon and label for the switcher rail and for the placeholder.
 ///
-/// Живёт в NotchUI, а не в NotchCore: какой символ представляет вкладку —
-/// вопрос представления, а не доменной логики, а NotchCore сознательно не
-/// импортирует ничего, что рисует UI. Подписи на русском — так же, как и
-/// остальной пользовательский текст панели (см. «Ничего не играет» в
+/// Lives in NotchUI, not NotchCore: which symbol represents a tab is
+/// a presentation question, not domain logic, and NotchCore deliberately
+/// doesn't import anything that draws UI. Labels are in English — same as
+/// the rest of the panel's user-facing text (see "Nothing playing" in
 /// MusicTabView).
 extension NotchTab {
-    /// SF Symbol колонки переключения. `TabRailView` перечисляет
-    /// `NotchTab.allCases`, поэтому у нового case вкладки нет способа
-    /// остаться без иконки незамеченным — компилятор потребует ветку в этом
-    /// switch (см. также TabRailViewTests.everyTabHasIconAndLabel).
+    /// SF Symbol for the switcher rail. `TabRailView` iterates
+    /// `NotchTab.allCases`, so a new tab case has no way to end up
+    /// without an icon unnoticed — the compiler will require a branch in
+    /// this switch (see also TabRailViewTests.everyTabHasIconAndLabel).
     var symbolName: String {
         switch self {
         case .music: "music.note"
@@ -22,32 +22,33 @@ extension NotchTab {
         }
     }
 
-    /// Человекочитаемое имя — для accessibilityLabel, подсказки при
-    /// наведении и подписи заглушки вкладки.
+    /// Human-readable name — for accessibilityLabel, the hover tooltip,
+    /// and the tab placeholder's label.
     var title: String {
         switch self {
-        case .music: "Музыка"
-        case .clipboard: "Буфер обмена"
-        case .notes: "Заметки"
-        case .pins: "Пины"
+        case .music: "Music"
+        case .clipboard: "Clipboard"
+        case .notes: "Notes"
+        case .pins: "Pins"
         }
     }
 }
 
-/// Колонка переключения вкладок слева от содержимого панели.
+/// Tab switcher rail to the left of the panel's content area.
 ///
-/// Постоянная ширина и полная высота области содержимого — задача просила
-/// именно такую раскладку взамен единственного клавиатурного пути (`⌘1`…`⌘4`,
-/// `⇥`), которым раньше и ограничивалось переключение: три из четырёх вкладок
-/// нечем было обнаружить на экране.
+/// Fixed width and full height of the content area — the task
+/// specifically asked for this layout to replace the single keyboard
+/// path (`⌘1`…`⌘4`, `⇥`) that switching used to be limited to: three
+/// of the four tabs had no way to be discovered on screen.
 public struct TabRailView: View {
     private let selected: NotchTab
     private let accent: Color
     private let onSelect: (NotchTab) -> Void
 
-    /// Общий для всех пунктов namespace: matchedGeometryEffect интерполирует
-    /// подложку активного пункта между её старым и новым положением только
-    /// когда оба используют один и тот же namespace и id (см. TabRailItemStyle).
+    /// Namespace shared by all items: matchedGeometryEffect only
+    /// interpolates the active item's backdrop between its old and new
+    /// position when both use the same namespace and id (see
+    /// TabRailItemStyle).
     @Namespace private var activeTabNamespace
 
     private static let width: CGFloat = 64
@@ -75,18 +76,18 @@ public struct TabRailView: View {
         }
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
-        // Тонкий шов между колонкой и содержимым — единственная линия на
-        // панели, дающая глазу границу без второго цвета: та же белая
-        // шкала прозрачности, что и остальной хром «Обсидиана».
+        // A thin seam between the rail and the content — the only line on
+        // the panel that gives the eye a border without a second color: the
+        // same white opacity scale as the rest of "Obsidian"'s chrome.
         .overlay(alignment: .trailing) {
             Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
         }
     }
 }
 
-/// Один пункт колонки: кнопка с иконкой, наведение и клик передаются наружу
-/// через onSelect — сама панель ничего не знает про то, как событие дойдёт
-/// до машины состояний (см. NotchPanelView.onSelectTab).
+/// A single rail item: an icon button; hover and click are passed
+/// outward via onSelect — the rail itself knows nothing about how the
+/// event reaches the state machine (see NotchPanelView.onSelectTab).
 private struct TabRailItem: View {
     let tab: NotchTab
     let isSelected: Bool
@@ -113,21 +114,22 @@ private struct TabRailItem: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    /// Активная вкладка — белая на полной непрозрачности: акцентная подложка
-    /// уже сообщает «это выбрано» (см. TabRailItemStyle.backdrop), а сама
-    /// иконка обязана оставаться самым читаемым элементом что на чёрном
-    /// фоне, что на мягкой акцентной плашке. Неактивные — белый низкой
-    /// прозрачности по требованию задачи, наведение поднимает её заметно,
-    /// но не до уровня активной.
+    /// The active tab is white at full opacity: the accent backdrop
+    /// already signals "this is selected" (see TabRailItemStyle.backdrop),
+    /// and the icon itself has to stay the most legible element whether
+    /// on the black background or on the soft accent plate. Inactive tabs
+    /// are low-opacity white per the task's requirement; hovering raises
+    /// it noticeably, but not to the active level.
     private var iconColor: Color {
         if isSelected { return .white }
         return .white.opacity(isHovering ? 0.7 : 0.4)
     }
 }
 
-/// Подложка активного пункта, наведение и нажатие — три разных состояния со
-/// своим визуальным сигналом у каждого, чтобы «под курсором» не читалось как
-/// «выбрано», а «выбрано» не терялось на «под курсором» соседней вкладки.
+/// The active item's backdrop, hover, and press are three distinct
+/// states each with their own visual signal, so "under the cursor"
+/// doesn't read as "selected", and "selected" doesn't get lost against
+/// a neighboring tab's "under the cursor".
 private struct TabRailItemStyle: ButtonStyle {
     let isSelected: Bool
     let isHovering: Bool
@@ -139,14 +141,15 @@ private struct TabRailItemStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(backdrop)
-            // Нажатие отзывается мгновенно, без сглаживания: своей анимации
-            // здесь нет намеренно. В NotchMotion нет константы подходящего
-            // порядка — opening/closing привязаны к состояниям панели, а
-            // accentFade в 0.6 с на порядок медленнее, чем нужно нажатию, —
-            // а заводить собственную запрещено правилом проекта. Подложка
-            // выбранной вкладки, в отличие от этого, анимируется: она
-            // наследует пружину NotchMotion через .animation(value: state)
-            // в NotchPanelView.body.
+            // The press responds instantly, with no easing: there's
+            // deliberately no animation here. NotchMotion has no constant
+            // of the right order — opening/closing are tied to panel
+            // states, and accentFade at 0.6s is an order of magnitude
+            // slower than a press needs — and introducing one of our own
+            // is forbidden by the project's rule. The selected tab's
+            // backdrop, unlike this, does animate: it inherits
+            // NotchMotion's spring via .animation(value: state) in
+            // NotchPanelView.body.
             .scaleEffect(configuration.isPressed ? 0.92 : 1)
     }
 

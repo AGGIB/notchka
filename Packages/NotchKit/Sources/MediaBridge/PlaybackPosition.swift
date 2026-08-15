@@ -1,20 +1,20 @@
 import Foundation
 
-/// Позиция воспроизведения на произвольный момент времени.
+/// Playback position at an arbitrary point in time.
 ///
-/// Существует потому, что адаптер отдаёт `elapsedTime` снимком и между
-/// событиями его не обновляет: читать поле напрямую значит показывать
-/// застывший прогресс-бар, пока не сменится трек.
+/// Exists because the adapter reports `elapsedTime` as a snapshot and doesn't
+/// update it between events: reading the field directly would mean showing a
+/// frozen progress bar until the track changes.
 public enum PlaybackPosition {
     public static func current(in snapshot: NowPlayingSnapshot, at now: Date) -> TimeInterval {
-        // На паузе метка времени устаревает произвольно долго, поэтому
-        // экстраполировать от неё нельзя — позиция просто замерла.
+        // While paused, the timestamp can go stale for an arbitrary length of
+        // time, so extrapolating from it isn't valid — the position is just frozen.
         guard snapshot.isPlaying else { return snapshot.elapsedTime }
 
         let drift = now.timeIntervalSince(snapshot.timestamp) * snapshot.playbackRate
         let raw = snapshot.elapsedTime + drift
-        // Нулевая длительность значит «поток без конца» (радио, стрим),
-        // ограничивать там нечем.
+        // Zero duration means an "endless stream" (radio, live stream),
+        // there's nothing to clamp against.
         let upperBound = snapshot.duration > 0 ? snapshot.duration : .greatestFiniteMagnitude
         return min(max(raw, 0), upperBound)
     }

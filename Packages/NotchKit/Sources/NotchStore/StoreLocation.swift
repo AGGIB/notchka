@@ -1,10 +1,10 @@
 import Foundation
 
-/// Где лежат база и блобы.
+/// Where the database and blobs live.
 ///
-/// Отдельный тип, потому что тестам нужно изолированное расположение:
-/// прогон, который пишет в боевую базу пользователя, недопустим, а
-/// подменять пути строками по месту — верный способ однажды промахнуться.
+/// A separate type because tests need an isolated location: a run that
+/// writes to the user's production database is unacceptable, and
+/// swapping paths with inline strings is a sure way to slip up eventually.
 public struct StoreLocation: Sendable, Equatable {
     public let root: URL
 
@@ -20,7 +20,7 @@ public struct StoreLocation: Sendable, Equatable {
         self.init(root: base.appending(path: bundleID))
     }
 
-    /// Изолированное расположение для тестов.
+    /// Isolated location for tests.
     public static func temporary() -> StoreLocation {
         StoreLocation(root: URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "notchka-tests-\(UUID().uuidString)"))

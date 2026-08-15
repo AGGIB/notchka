@@ -1,12 +1,13 @@
 import SwiftUI
 import CoreGraphics
 
-/// Акцентный цвет, вытянутый из обложки.
+/// Accent color extracted from the artwork.
 ///
-/// Панель чёрная, поэтому «средний цвет картинки» не годится: тёмная или
-/// блёклая обложка дала бы акцент, неотличимый от фона. Оттенок берётся из
-/// обложки, а яркость и насыщенность зажимаются в диапазон, где цвет
-/// гарантированно виден на чёрном.
+/// The panel is black, so a plain "average color of the image" approach
+/// won't work: a dark or washed-out cover would produce an accent
+/// indistinguishable from the background. Hue is taken from the artwork,
+/// while brightness and saturation are clamped to a range that's
+/// guaranteed to be visible on black.
 public enum ArtworkAccent {
     public static let minBrightness: Double = 0.55
     public static let minSaturation: Double = 0.35
@@ -17,17 +18,19 @@ public enum ArtworkAccent {
         return Color(hue: corrected.h, saturation: corrected.s, brightness: corrected.b)
     }
 
-    /// Средний цвет картинки в HSB. Усреднение отрисовкой в 1×1 — самый
-    /// дешёвый способ; точности «на глаз» для акцента достаточно.
+    /// Average color of the image in HSB. Averaging by rendering into a 1×1
+    /// context is the cheapest approach; "good enough by eye" precision is
+    /// all an accent color needs.
     ///
-    /// Создание контекста, отрисовка и чтение буфера обязаны идти внутри
-    /// одного `withUnsafeMutableBytes` — указатель, который context хранит и
-    /// пишет через него при `draw`, валиден только на время этого closure.
-    /// `&pixel`, переданный отдельным выражением в `CGContext(data:...)`
-    /// (как было раньше), валиден лишь на длительность самого вызова
-    /// инициализатора: компилятор вправе передать туда указатель на
-    /// временную копию буфера массива, а не на его настоящий storage, и то,
-    /// что на практике буфер не переезжает, — везение, а не гарантия.
+    /// Context creation, drawing, and reading the buffer must all happen
+    /// inside a single `withUnsafeMutableBytes` — the pointer the context
+    /// stores and writes through during `draw` is only valid for the
+    /// duration of that closure. `&pixel` passed as a separate expression to
+    /// `CGContext(data:...)` (as it was before) is only valid for the
+    /// duration of the initializer call itself: the compiler is free to pass
+    /// a pointer to a temporary copy of the array's buffer rather than its
+    /// actual storage, and the fact that in practice the buffer doesn't
+    /// move is luck, not a guarantee.
     public static func hsb(from image: CGImage) -> (h: Double, s: Double, b: Double)? {
         var pixel = [UInt8](repeating: 0, count: 4)
         let space = CGColorSpaceCreateDeviceRGB()
@@ -49,7 +52,7 @@ public enum ArtworkAccent {
         }
     }
 
-    /// Поднимает яркость и насыщенность до порогов читаемости, не трогая оттенок.
+    /// Raises brightness and saturation to the readability thresholds without touching the hue.
     public static func readable(
         _ hsb: (h: Double, s: Double, b: Double)
     ) -> (h: Double, s: Double, b: Double) {

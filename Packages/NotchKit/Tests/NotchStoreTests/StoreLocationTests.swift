@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import NotchStore
 
-@Test("база и блобы лежат внутри каталога приложения")
+@Test("database and blobs live inside the app's directory")
 func pathsAreInsideApplicationSupport() {
     let location = StoreLocation(bundleID: "kz.mobilefirst.notchka")
     #expect(location.databaseURL.path.contains("Application Support/kz.mobilefirst.notchka"))
@@ -10,7 +10,7 @@ func pathsAreInsideApplicationSupport() {
     #expect(location.databaseURL.lastPathComponent == "notch.sqlite")
 }
 
-@Test("временное расположение изолировано и не трогает боевое")
+@Test("temporary location is isolated and doesn't touch production")
 func temporaryLocationIsIsolated() {
     let a = StoreLocation.temporary()
     let b = StoreLocation.temporary()
@@ -18,7 +18,7 @@ func temporaryLocationIsIsolated() {
     #expect(a.databaseURL.path.contains("Application Support") == false)
 }
 
-@Test("каталоги создаются по требованию")
+@Test("directories are created on demand")
 func directoriesAreCreated() throws {
     let location = StoreLocation.temporary()
     try location.createDirectories()

@@ -1,7 +1,7 @@
 import Foundation
 
-/// Частичный payload: адаптер шлёт диффы, где заданы только изменившиеся поля,
-/// поэтому все свойства опциональны и «отсутствует» не равно «сброшено в ноль».
+/// Partial payload: the adapter sends diffs where only changed fields are set,
+/// so every property is optional and "absent" does not mean "reset to zero".
 public struct NowPlayingPayload: Sendable, Equatable, Decodable {
     public var title: String?
     public var artist: String?
@@ -14,18 +14,18 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
     public var bundleIdentifier: String?
     public var artworkData: Data?
     public var artworkMimeType: String?
-    /// Bundle id родительского приложения — приходит отдельно от
-    /// `bundleIdentifier`, когда источник на самом деле вспомогательный
-    /// процесс. Находка Task 4: Safari отдаёт `bundleIdentifier ==
-    /// "com.apple.WebKit.GPU"` (процесс рендеринга), а это поле несёт
-    /// настоящее приложение, `"com.apple.Safari"`. У большинства
-    /// источников (Chrome напрямую и т.п.) адаптер это поле не присылает
-    /// вовсе — nil, а не пустая строка.
+    /// Bundle id of the parent application — arrives separately from
+    /// `bundleIdentifier` when the source is actually a helper
+    /// process. Task 4 finding: Safari reports `bundleIdentifier ==
+    /// "com.apple.WebKit.GPU"` (the rendering process), while this field carries
+    /// the real app, `"com.apple.Safari"`. For most
+    /// sources (Chrome directly, etc.) the adapter doesn't send this field
+    /// at all — nil, not an empty string.
     public var parentApplicationBundleIdentifier: String?
 
     public init() {}
 
-    /// Пустой payload значит «сессии нет», а не «трек без названия».
+    /// An empty payload means "no session", not "track with no title".
     public var isEmpty: Bool {
         title == nil && artist == nil && album == nil && duration == nil
             && elapsedTime == nil && timestamp == nil && playbackRate == nil
@@ -33,11 +33,11 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
             && artworkMimeType == nil && parentApplicationBundleIdentifier == nil
     }
 
-    /// Накладывает дифф на имеющийся снимок. Возвращает nil, если снимка ещё
-    /// не было: дифф сам по себе не описывает трек целиком.
+    /// Applies a diff onto an existing snapshot. Returns nil if there was no
+    /// snapshot yet: a diff alone doesn't describe a full track.
     ///
-    /// `now` используется ровно в одном случае — см. блок про перепривязку
-    /// метки времени ниже; для любого другого перехода он не влияет ни на что.
+    /// `now` is used in exactly one case — see the timestamp rebinding block
+    /// below; for any other transition it has no effect at all.
     public func applied(to base: NowPlayingSnapshot?, now: Date) -> NowPlayingSnapshot? {
         guard var snapshot = base else { return nil }
         let wasPlaying = snapshot.isPlaying
@@ -56,26 +56,26 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
             snapshot.parentApplicationBundleID = parentApplicationBundleIdentifier
         }
 
-        // Play/pause-тумблер приходит парой диффов (спайк, раздел «Поток
-        // обновлений»): первая строка несёт только {"playing":true}, без
-        // собственной timestamp, вторая донесёт настоящую метку чуть позже.
-        // Без перепривязки здесь snapshot.timestamp остался бы тем, что было
-        // до этого диффа, — то есть моментом, когда трек ПОСТАВИЛИ на паузу,
-        // а не моментом, когда его возобновили. PlaybackPosition.current
-        // экстраполирует «now − timestamp» только пока isPlaying истинно, так
-        // что вся длительность паузы превращается в мнимый прогресс, и бар
-        // прыгает к концу трека до прихода второй строки диффа. Условие
-        // узкое нарочно: только переход false→true и только когда сам дифф
-        // не прислал timestamp — во всех остальных случаях значение адаптера
-        // (или его отсутствие) остаётся как есть.
+        // The play/pause toggle arrives as a pair of diffs (see the "Update
+        // stream" section of the spike): the first line carries only {"playing":true},
+        // with no timestamp of its own; the second delivers the real one shortly
+        // after. Without rebinding here, snapshot.timestamp would stay whatever it
+        // was before this diff — i.e. the moment the track was PAUSED,
+        // not the moment it resumed. PlaybackPosition.current
+        // extrapolates "now − timestamp" only while isPlaying is true, so
+        // the entire pause duration turns into phantom progress, and the bar
+        // jumps to the end of the track before the second diff line arrives. The
+        // condition is deliberately narrow: only the false→true transition, and only
+        // when the diff itself didn't send a timestamp — in every other case the
+        // adapter's value (or lack thereof) is left as is.
         if timestamp == nil, playing == true, !wasPlaying {
             snapshot.timestamp = now
         }
         return snapshot
     }
 
-    /// Полный снимок из payload. Недостающие поля заполняются нейтрально:
-    /// адаптер опускает пустые строки и нулевые длительности.
+    /// Full snapshot built from the payload. Missing fields are filled neutrally:
+    /// the adapter omits empty strings and zero durations.
     public func asSnapshot() -> NowPlayingSnapshot? {
         guard !isEmpty else { return nil }
         return NowPlayingSnapshot(
@@ -95,12 +95,12 @@ public struct NowPlayingPayload: Sendable, Equatable, Decodable {
     }
 }
 
-/// Одна строка вывода адаптера.
+/// One line of adapter output.
 public enum AdapterLine: Sendable, Equatable {
-    /// Полное состояние. nil значит «сессии нет».
+    /// Full state. nil means "no session".
     case snapshot(NowPlayingSnapshot?)
     case diff(NowPlayingPayload)
-    /// Адаптер жив, но конкретный ответ не получился — канал ронять не надо.
+    /// The adapter is alive, but this particular response didn't come through — the channel shouldn't be dropped.
     case transientFailure(String)
     case unrecognized(String)
 
@@ -110,8 +110,8 @@ public enum AdapterLine: Sendable, Equatable {
         let payload: NowPlayingPayload
     }
 
-    /// Известный текст таймаута из адаптера. Проверяется перед разбором JSON
-    /// чтобы отличить временную осечку от невалидного входа.
+    /// Known timeout text from the adapter. Checked before parsing JSON
+    /// to distinguish a transient misfire from invalid input.
     private static let adapterTimeoutMessage = "timed out"
 
     public static func parse(_ line: String) -> AdapterLine {
@@ -122,38 +122,38 @@ public enum AdapterLine: Sendable, Equatable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        // Проверка таймаута идёт после попытки разобрать JSON. Если строка
-        // — валидный JSON-объект, это не осечка адаптера, а просто данные.
-        // Только открытый текст может быть ошибкой таймаута.
+        // The timeout check happens after attempting to parse JSON. If the line
+        // is a valid JSON object, it's not an adapter misfire, just data.
+        // Only plain text can be a timeout error.
         if let envelope = try? decoder.decode(Envelope.self, from: data) {
             return envelope.diff ? .diff(envelope.payload) : .snapshot(envelope.payload.asSnapshot())
         }
 
-        // Осечку адаптер печатает открытым текстом, не JSON-ом. Отличать её
-        // от мусора важно: супервизор не должен считать это падением канала.
+        // A misfire is printed by the adapter as plain text, not JSON. Distinguishing it
+        // from garbage matters: the supervisor shouldn't treat this as a channel failure.
         if trimmed.contains(adapterTimeoutMessage) { return .transientFailure(trimmed) }
 
         return .unrecognized(line)
     }
 
-    /// Разбирает голый payload команды `get` — отдельный путь от `parse(_:)`
-    /// выше, а не его ветка внутри.
+    /// Parses the bare payload of the `get` command — a separate path from
+    /// `parse(_:)` above, not a branch inside it.
     ///
-    /// `parse(_:)` рассчитан на строки `stream` и всегда ждёт конверт
-    /// `{"type":..,"diff":..,"payload":..}`; `get` печатает `NowPlayingPayload`
-    /// как есть, без конверта вообще, поэтому `Envelope.decode` на такой
-    /// строке не найдёт ключ `payload` и провалится — сама строка при этом
-    /// вполне валидный JSON, так что `parse(_:)` доехал бы до `.unrecognized`,
-    /// а не до осечки или снимка. Смешивать два формата в одном методе
-    /// значило бы либо ослаблять Envelope до опциональных полей (и тогда
-    /// строка stream без "type" тоже стала бы молча проходить как payload),
-    /// либо гадать по наличию ключей — оба варианта хуже честного отдельного
-    /// пути с говорящим именем.
+    /// `parse(_:)` is built for `stream` lines and always expects the envelope
+    /// `{"type":..,"diff":..,"payload":..}`; `get` prints the `NowPlayingPayload`
+    /// as-is, with no envelope at all, so `Envelope.decode` on such
+    /// a line won't find the `payload` key and will fail — while the line itself
+    /// is perfectly valid JSON, so `parse(_:)` would end up at `.unrecognized`,
+    /// not at a misfire or a snapshot. Mixing the two formats into one method
+    /// would mean either weakening Envelope down to optional fields (in which case
+    /// a stream line without "type" would also silently pass through as a payload),
+    /// or guessing based on which keys are present — both options are worse than
+    /// an honest, separate, clearly named path.
     ///
-    /// Существует ради разовой пересинхронизации (см. `AdapterProcess.get()`
-    /// / `AdapterProvider.refresh()`): нужен полный `NowPlayingSnapshot?`,
-    /// а не `AdapterLine` — вызывающей стороне неоткуда взять `diff`-флаг
-    /// для конверта, которого в этом формате не было изначально.
+    /// Exists for one-off resynchronization (see `AdapterProcess.get()`
+    /// / `AdapterProvider.refresh()`): a full `NowPlayingSnapshot?` is needed,
+    /// not `AdapterLine` — the caller has nowhere to get the `diff` flag
+    /// for an envelope that this format never had in the first place.
     public static func parseSnapshot(_ line: String) -> NowPlayingSnapshot? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return nil }

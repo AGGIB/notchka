@@ -2,41 +2,42 @@ import Testing
 import Foundation
 @testable import NotchUI
 
-/// Календарь с прибитым поясом, а не `.current`.
+/// A calendar pinned to a fixed time zone, not `.current`.
 ///
-/// «Вчера» — календарное понятие, а не «минус 24 часа»: попадёт ли момент
-/// на предыдущий день, зависит от пояса машины. С `.current` тест был бы
-/// зелёным здесь и красным у того, кто запустит его восточнее или западнее,
-/// причём без всякой связи с кодом, который он проверяет.
+/// "Yesterday" is a calendar concept, not "minus 24 hours": whether a
+/// moment falls on the previous day depends on the machine's time zone.
+/// With `.current` the test would pass here and fail for whoever runs it
+/// further east or west, with no connection at all to the code it's
+/// actually checking.
 private var calendar: Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     return calendar
 }
 
-/// 2027-01-15T08:00:00Z — середина суток по UTC, чтобы сдвиги на несколько
-/// часов в тестах ниже не перескакивали через полночь случайно.
+/// 2027-01-15T08:00:00Z — the middle of the day in UTC, so the multi-hour
+/// shifts in the tests below don't accidentally cross midnight.
 private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-@Test("сегодняшняя заметка показывает время")
+@Test("today's note shows the time")
 func todayShowsTime() {
     let text = NoteFormatting.relativeDate(now.addingTimeInterval(-3600), now: now, calendar: calendar)
     #expect(text.contains(":"))
 }
 
-@Test("вчерашняя подписана словом")
+@Test("yesterday's note is labeled with a word")
 func yesterdayIsNamed() {
     let text = NoteFormatting.relativeDate(now.addingTimeInterval(-26 * 3600), now: now, calendar: calendar)
-    #expect(text == "вчера")
+    #expect(text == "yesterday")
 }
 
-@Test("старая показывает дату без времени")
+@Test("an older note shows a date without a time")
 func olderShowsDate() {
     let text = NoteFormatting.relativeDate(now.addingTimeInterval(-10 * 24 * 3600), now: now, calendar: calendar)
     #expect(text.contains(":") == false)
 }
 
-@Test("будущая дата не ломает форматирование")
+@Test("a future date doesn't break formatting")
 func futureIsSafe() {
     let text = NoteFormatting.relativeDate(now.addingTimeInterval(3600), now: now, calendar: calendar)
     #expect(text.isEmpty == false)

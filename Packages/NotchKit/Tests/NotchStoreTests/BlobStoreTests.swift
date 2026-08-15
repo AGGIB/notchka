@@ -8,20 +8,20 @@ private func makeStore() throws -> BlobStore {
     return BlobStore(location: location)
 }
 
-@Test("одинаковые данные дают одинаковый путь")
+@Test("identical data produces the same path")
 func identicalDataSharesPath() throws {
     let store = try makeStore()
-    let data = Data("одно и то же".utf8)
+    let data = Data("identical data".utf8)
     #expect(try store.store(data) == store.store(data))
 }
 
-@Test("разные данные дают разные пути")
+@Test("different data produces different paths")
 func differentDataDiffers() throws {
     let store = try makeStore()
     #expect(try store.store(Data("a".utf8)) != store.store(Data("b".utf8)))
 }
 
-@Test("сохранённые данные читаются обратно без изменений")
+@Test("stored data reads back unchanged")
 func roundTripPreservesBytes() throws {
     let store = try makeStore()
     let original = Data((0..<1024).map { UInt8($0 % 256) })
@@ -29,7 +29,7 @@ func roundTripPreservesBytes() throws {
     #expect(try store.data(at: path) == original)
 }
 
-@Test("повторное сохранение не удваивает место на диске")
+@Test("storing the same data twice does not double disk usage")
 func duplicateStoreDoesNotGrow() throws {
     let store = try makeStore()
     let data = Data(repeating: 7, count: 4096)
@@ -39,7 +39,7 @@ func duplicateStoreDoesNotGrow() throws {
     #expect(try store.totalSize() == afterFirst)
 }
 
-@Test("путь разложен по подкаталогам, чтобы не собирать тысячи файлов в одном")
+@Test("path is sharded into subdirectories so thousands of files don't pile up in one")
 func pathIsSharded() throws {
     let store = try makeStore()
     let path = try store.store(Data("x".utf8))
@@ -47,7 +47,7 @@ func pathIsSharded() throws {
     #expect(path.split(separator: "/").first?.count == 2)
 }
 
-@Test("удаление убирает файл и освобождает место")
+@Test("removal deletes the file and frees space")
 func removeFreesSpace() throws {
     let store = try makeStore()
     let path = try store.store(Data(repeating: 1, count: 2048))
@@ -55,17 +55,17 @@ func removeFreesSpace() throws {
     #expect(try store.totalSize() == 0)
 }
 
-@Test("чтение отсутствующего блоба бросает, а не отдаёт пустые данные")
+@Test("reading a missing blob throws instead of returning empty data")
 func missingBlobThrows() throws {
     let store = try makeStore()
-    #expect(throws: (any Error).self) { try store.data(at: "aa/несуществующий") }
+    #expect(throws: (any Error).self) { try store.data(at: "aa/nonexistent") }
 }
 
-/// Остальные проверки объёма сравнивают его сам с собой: «не вырос»,
-/// «обнулился». Их прошла бы и реализация, всегда возвращающая ноль, —
-/// а на этом числе держится бюджет объёма в RetentionPolicy, и заниженный
-/// ответ там означает, что вытеснение просто не сработает.
-@Test("объём считается в реальных байтах, а не приблизительно")
+/// The other size checks compare the value against itself: "didn't grow,"
+/// "went to zero." An implementation that always returns zero would pass
+/// those too — but RetentionPolicy's size budget relies on this number, and
+/// an understated answer there means eviction simply won't trigger.
+@Test("size is counted in actual bytes, not approximated")
 func totalSizeCountsActualBytes() throws {
     let store = try makeStore()
     try store.store(Data(repeating: 1, count: 3000))
@@ -75,12 +75,12 @@ func totalSizeCountsActualBytes() throws {
     #expect(try store.totalSize() == 3500)
 }
 
-/// Удаление уже удалённого приходит из вытеснения, которое может сойтись
-/// по времени с ручным удалением того же блоба. Это должно быть тихо.
-@Test("повторное удаление не бросает")
+/// Deleting an already-deleted blob happens when eviction coincides in time
+/// with a manual removal of the same blob. This should be quiet.
+@Test("removing twice does not throw")
 func removingTwiceIsQuiet() throws {
     let store = try makeStore()
-    let path = try store.store(Data("дважды".utf8))
+    let path = try store.store(Data("twice".utf8))
     try store.remove(at: path)
     try store.remove(at: path)
     #expect(try store.totalSize() == 0)

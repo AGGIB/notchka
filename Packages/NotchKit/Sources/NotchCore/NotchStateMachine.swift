@@ -1,15 +1,15 @@
-/// Единственный источник истины о состоянии панели.
-/// Синхронная и не зависит от времени: пороги курсора и таймер автопика
-/// живут снаружи и приходят сюда уже готовыми событиями.
+/// The single source of truth for the panel's state.
+/// Synchronous and time-independent: cursor thresholds and the auto-peek timer
+/// live outside and arrive here as ready-made events.
 public struct NotchStateMachine: Sendable {
     public private(set) var state: NotchState = .closed
-    /// Вкладка, на которую вернёт хоткей.
+    /// The tab the hotkey will return to.
     public private(set) var lastTab: NotchTab = .music
     public private(set) var isFullScreen = false
 
     public init() {}
 
-    /// Возвращает новое состояние, если оно изменилось, иначе nil.
+    /// Returns the new state if it changed, otherwise nil.
     @discardableResult
     public mutating func handle(_ event: NotchEvent) -> NotchState? {
         guard let next = resolve(event), next != state else { return nil }
@@ -21,7 +21,7 @@ public struct NotchStateMachine: Sendable {
     private mutating func resolve(_ event: NotchEvent) -> NotchState? {
         if case .fullScreenChanged(let isActive) = event {
             isFullScreen = isActive
-            // В фуллскрине меню-бар скрыт, а область выреза чёрная — панели негде жить.
+            // In full screen the menu bar is hidden and the notch area is black — there's nowhere for the panel to live.
             return isActive ? .closed : nil
         }
         guard !isFullScreen else { return nil }
@@ -52,8 +52,8 @@ public struct NotchStateMachine: Sendable {
         case (.expanded(let tab), .cycleTab):
             return .expanded(tab.next)
 
-        // Уход курсора из развёрнутой панели её не закрывает: работа с лентой
-        // буфера подразумевает движение мыши куда угодно.
+        // Cursor leaving the expanded panel doesn't close it: working with the
+        // clipboard feed implies mouse movement anywhere.
         default:
             return nil
         }

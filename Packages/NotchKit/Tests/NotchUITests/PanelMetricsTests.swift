@@ -5,19 +5,19 @@ import NotchCore
 
 private let notch = CGSize(width: 200, height: 32)
 
-@Test("в покое панель ровно по вырезу")
+@Test("panel matches the notch exactly at rest")
 func closedMatchesNotch() {
     #expect(PanelMetrics.size(for: .closed, notch: notch) == notch)
 }
 
-@Test("peek шире и выше выреза")
+@Test("peek is wider and taller than the notch")
 func peekIsLarger() {
     let size = PanelMetrics.size(for: .peek(.hover), notch: notch)
     #expect(size.width > notch.width)
     #expect(size.height > notch.height)
 }
 
-@Test("разворот больше peek")
+@Test("expanded is larger than peek")
 func expandedIsLargerThanPeek() {
     let peek = PanelMetrics.size(for: .peek(.hover), notch: notch)
     let expanded = PanelMetrics.size(for: .expanded(.music), notch: notch)
@@ -25,36 +25,36 @@ func expandedIsLargerThanPeek() {
     #expect(expanded.height > peek.height)
 }
 
-@Test("разворот одинаков для всех вкладок — панель не прыгает при переключении")
+@Test("expanded size is the same across all tabs — the panel doesn't jump when switching")
 func expandedSizeIsTabIndependent() {
     let sizes = NotchTab.allCases.map { PanelMetrics.size(for: .expanded($0), notch: notch) }
     #expect(Set(sizes.map(\.width)).count == 1)
     #expect(Set(sizes.map(\.height)).count == 1)
 }
 
-@Test("разворот помещается в окно с запасом на вогнутые уши")
+@Test("expanded fits in the window with room to spare for the concave ears")
 func expandedFitsWindow() {
     let expanded = PanelMetrics.size(for: .expanded(.music), notch: notch)
     #expect(expanded.width + 2 * PanelMetrics.concaveRadius <= PanelMetrics.windowSize.width)
     #expect(expanded.height <= PanelMetrics.windowSize.height)
 }
 
-/// Обложка подобрана под текущий размер панели, и связь эта до сих пор
-/// держалась на одном комментарии. Уменьшится expandedSize или вырастут
-/// отступы — обложка перестанет помещаться, а SwiftUI об этом не скажет
-/// ничего: он не даёт на переполнении ни ошибки, ни предупреждения, просто
-/// обрезает или накладывает одно на другое.
-@Test("обложка помещается в область содержимого по высоте")
+/// The artwork is sized to match the panel's current size, and until now
+/// that relationship was held together by a single comment. If expandedSize
+/// shrinks or the insets grow, the artwork stops fitting, and SwiftUI won't
+/// say a word about it: it gives no error or warning on overflow, it just
+/// clips or overlaps.
+@Test("artwork fits the content area's height")
 func artworkFitsContentArea() {
     let content = PanelMetrics.contentSize(notchHeight: PanelMetrics.referenceNotchHeight)
     #expect(MusicTabView.artworkSize <= content.height)
 }
 
-/// Содержимое обязано начинаться ниже физического выреза. Отступ сверху
-/// когда-то был зашит числом 24 при вырезе в 32 pt, и чёлка накрывала верх
-/// обложки и название трека — снаружи это выглядело как обрезанная картинка,
-/// а не как ошибка раскладки, и заметил это человек, а не тест.
-@Test("верхний отступ не меньше высоты выреза")
+/// Content must start below the physical notch. The top inset used to be
+/// hardcoded as 24 for a 32 pt notch, and the notch ended up covering the
+/// top of the artwork and the track title — from the outside it looked like
+/// a cropped image, not a layout bug, and a human spotted it, not a test.
+@Test("top inset is never smaller than the notch height")
 func topInsetClearsTheNotch() {
     for notchHeight in [CGFloat(28), 32, 40] {
         let insets = PanelMetrics.contentInsets(notchHeight: notchHeight)
@@ -62,9 +62,10 @@ func topInsetClearsTheNotch() {
     }
 }
 
-/// Колонка вкладок и обложка делят одну строку. Их сумма со всеми зазорами
-/// обязана оставлять плееру осмысленную ширину, а не съедать её в ноль.
-@Test("после колонки вкладок и обложки плееру остаётся место")
+/// The tab column and the artwork share one row. Their combined width, plus
+/// all the gaps, must leave the player a reasonable width — not eat it down
+/// to zero.
+@Test("player keeps a usable width after the tab column and artwork")
 func playerKeepsUsableWidth() {
     let content = PanelMetrics.contentSize(notchHeight: PanelMetrics.referenceNotchHeight)
     let takenByArtwork = MusicTabView.artworkSize + 2 * PanelMetrics.horizontalInset

@@ -1,55 +1,56 @@
 import Testing
 @testable import ClipboardKit
 
-// Положительные ожидания записаны как `== true`, а не голым вызовом.
-// Это не многословие ради многословия: `#expect` разворачивается в
-// замыкание, где получатель вызова неизменяем, а `shouldRead` — mutating,
-// и голая форма просто не компилируется. Сравнение выводит вызов из-под
-// этого разворачивания. Не «упрощать» обратно — сборка сломается.
+// Positive expectations are written as `== true` rather than as a bare call.
+// This isn't verbosity for its own sake: `#expect` expands into a
+// closure where the call's receiver is immutable, but `shouldRead` is
+// mutating, so the bare form simply doesn't compile. The comparison moves
+// the call out from under that expansion. Don't "simplify" this back —
+// the build will break.
 
-@Test("первое изменение счётчика читается")
+@Test("first change count is read")
 func firstChangeIsRead() {
     var poller = PasteboardPoller()
     #expect(poller.shouldRead(changeCount: 7, idleSeconds: 0) == true)
 }
 
-@Test("тот же счётчик второй раз не читается")
+@Test("the same count is not read a second time")
 func sameCountIsSkipped() {
     var poller = PasteboardPoller()
     _ = poller.shouldRead(changeCount: 7, idleSeconds: 0)
     #expect(poller.shouldRead(changeCount: 7, idleSeconds: 0) == false)
 }
 
-@Test("новое изменение читается")
+@Test("a new change is read")
 func newChangeIsRead() {
     var poller = PasteboardPoller()
     _ = poller.shouldRead(changeCount: 7, idleSeconds: 0)
     #expect(poller.shouldRead(changeCount: 8, idleSeconds: 0) == true)
 }
 
-@Test("при долгой неактивности не читаем — копировать некому")
+@Test("not read after a long idle period — no one around to copy")
 func idleUserIsNotPolled() {
     var poller = PasteboardPoller()
     #expect(poller.shouldRead(changeCount: 9, idleSeconds: 120) == false)
 }
 
-@Test("вернувшийся пользователь снова читается, и пропущенное подхватывается")
+@Test("a returning user is read again, and the missed change is picked up")
 func returningUserIsReadAgain() {
     var poller = PasteboardPoller()
     _ = poller.shouldRead(changeCount: 9, idleSeconds: 120)
     #expect(poller.shouldRead(changeCount: 9, idleSeconds: 1) == true)
 }
 
-@Test("помеченное своим изменение не читается")
+@Test("a change marked as our own is not read")
 func ownChangeIsIgnored() {
     var poller = PasteboardPoller()
     poller.ignore(changeCount: 42)
     #expect(poller.shouldRead(changeCount: 42, idleSeconds: 0) == false)
-    // Следующее, уже чужое, читается как обычно.
+    // The next one, no longer ours, is read as usual.
     #expect(poller.shouldRead(changeCount: 43, idleSeconds: 0) == true)
 }
 
-@Test("интервал и порог неактивности совпадают со спекой")
+@Test("interval and idle threshold match the spec")
 func constantsMatchSpec() {
     #expect(PasteboardPoller.interval == 0.4)
     #expect(PasteboardPoller.idleThreshold == 60)

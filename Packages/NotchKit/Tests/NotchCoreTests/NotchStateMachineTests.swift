@@ -1,13 +1,13 @@
 import Testing
 @testable import NotchCore
 
-@Test("курсор в горячей зоне открывает peek")
+@Test("cursor in hot zone opens peek")
 func cursorOpensPeek() {
     var machine = NotchStateMachine()
     #expect(machine.handle(.cursorEnteredHotZone) == .peek(.hover))
 }
 
-@Test("хоткей из закрытого состояния разворачивает последнюю вкладку")
+@Test("hotkey from closed state expands the last tab")
 func hotkeyOpensLastTab() {
     var machine = NotchStateMachine()
     machine.handle(.hotkey)
@@ -16,35 +16,35 @@ func hotkeyOpensLastTab() {
     #expect(machine.handle(.hotkey) == .expanded(.notes))
 }
 
-@Test("смена трека даёт автопик, который сам истекает")
+@Test("track change triggers an auto-peek that expires on its own")
 func trackChangeAutoPeeks() {
     var machine = NotchStateMachine()
     #expect(machine.handle(.trackChanged) == .peek(.trackChanged))
     #expect(machine.handle(.peekTimedOut) == .closed)
 }
 
-@Test("наведение во время автопика превращает его в hover")
+@Test("hovering during auto-peek turns it into hover")
 func hoverTakesOverAutoPeek() {
     var machine = NotchStateMachine()
     machine.handle(.trackChanged)
     #expect(machine.handle(.cursorEnteredHotZone) == .peek(.hover))
 }
 
-@Test("клик по peek разворачивает вкладку музыки")
+@Test("clicking peek expands the music tab")
 func clickExpandsToMusic() {
     var machine = NotchStateMachine()
     machine.handle(.cursorEnteredHotZone)
     #expect(machine.handle(.click) == .expanded(.music))
 }
 
-@Test("уход курсора закрывает peek")
+@Test("cursor leaving closes peek")
 func cursorLeaveClosesPeek() {
     var machine = NotchStateMachine()
     machine.handle(.cursorEnteredHotZone)
     #expect(machine.handle(.cursorLeftHotZone) == .closed)
 }
 
-@Test("уход курсора НЕ закрывает развёрнутую панель")
+@Test("cursor leaving does NOT close the expanded panel")
 func cursorLeaveKeepsExpandedOpen() {
     var machine = NotchStateMachine()
     machine.handle(.hotkey)
@@ -52,21 +52,21 @@ func cursorLeaveKeepsExpandedOpen() {
     #expect(machine.state == .expanded(.music))
 }
 
-@Test("Esc и клик вне панели закрывают разворот")
+@Test("Esc and clicking outside the panel close the expanded view")
 func dismissClosesExpanded() {
     var machine = NotchStateMachine()
     machine.handle(.hotkey)
     #expect(machine.handle(.dismiss) == .closed)
 }
 
-@Test("хоткей на развёрнутой панели её закрывает")
+@Test("hotkey on the expanded panel closes it")
 func hotkeyTogglesExpandedClosed() {
     var machine = NotchStateMachine()
     machine.handle(.hotkey)
     #expect(machine.handle(.hotkey) == .closed)
 }
 
-@Test("цикл вкладок идёт по кругу")
+@Test("tab cycling wraps around")
 func cycleTabWrapsAround() {
     var machine = NotchStateMachine()
     machine.handle(.hotkey)
@@ -76,7 +76,7 @@ func cycleTabWrapsAround() {
     #expect(machine.handle(.cycleTab) == .expanded(.music))
 }
 
-@Test("фуллскрин закрывает панель и глушит события")
+@Test("full screen closes the panel and suppresses events")
 func fullScreenDisablesPanel() {
     var machine = NotchStateMachine()
     machine.handle(.hotkey)
@@ -86,7 +86,7 @@ func fullScreenDisablesPanel() {
     #expect(machine.state == .closed)
 }
 
-@Test("выход из фуллскрина возвращает реакцию на события")
+@Test("exiting full screen restores event handling")
 func leavingFullScreenReenablesPanel() {
     var machine = NotchStateMachine()
     machine.handle(.fullScreenChanged(true))
@@ -94,7 +94,7 @@ func leavingFullScreenReenablesPanel() {
     #expect(machine.handle(.cursorEnteredHotZone) == .peek(.hover))
 }
 
-@Test("хоткей в peek разворачивает на последнюю вкладку, отличаясь от клика")
+@Test("hotkey in peek expands to the last tab, unlike click")
 func hotkeyInPeekUsesLastTabClickAlwaysMusic() {
     var machine = NotchStateMachine()
     // Set lastTab to something other than default
@@ -112,7 +112,7 @@ func hotkeyInPeekUsesLastTabClickAlwaysMusic() {
     #expect(machine.handle(.click) == .expanded(.music))
 }
 
-@Test("повторное событие без смены состояния не сообщается")
+@Test("a repeated event with no state change is not reported")
 func idempotentEventsReturnNil() {
     var machine = NotchStateMachine()
     machine.handle(.cursorEnteredHotZone)

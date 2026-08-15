@@ -1,59 +1,62 @@
 import SwiftUI
 
-/// Правила бегущей строки: нужно ли прокручивать текст и сколько длится один
-/// проход.
+/// Marquee rules: whether the text needs to scroll and how long one pass
+/// takes.
 ///
-/// Отделены от отрисовки тем же приёмом, что и TrackFormatting,
-/// ClipboardCard.preview, ClipboardTabContent.resolve — решение проверяется
-/// тестом без окна, а не глазом на живой панели (см. MarqueeMetricsTests).
+/// Separated from rendering by the same approach as TrackFormatting,
+/// ClipboardCard.preview, ClipboardTabContent.resolve — the decision is
+/// verified by a windowless test, not by eye on a live panel (see
+/// MarqueeMetricsTests).
 public enum MarqueeMetrics {
-    /// Прокрутка нужна, только когда текст СТРОГО шире отведённого места.
+    /// Scrolling is needed only when the text is STRICTLY wider than the
+    /// available space.
     ///
-    /// Текст, который влезает ровно впритык (`textWidth == availableWidth`),
-    /// не прокручивается: весь целиком, он уже виден без движения, а
-    /// сдвигать его — значит выдавать за анимацию то, что на самом деле
-    /// ничего не решает и выглядит дёрганьем на ровном месте.
+    /// Text that fits exactly (`textWidth == availableWidth`) does not
+    /// scroll: it's already fully visible without movement, and shifting it
+    /// would pass off as animation something that actually solves nothing
+    /// and just looks like jitter for no reason.
     public static func shouldScroll(textWidth: CGFloat, availableWidth: CGFloat) -> Bool {
         textWidth > availableWidth
     }
 
-    /// Сколько времени текст указанной ширины едет мимо на данной скорости.
+    /// How long it takes text of the given width to travel past at the
+    /// given speed.
     ///
-    /// Неположительные ширина или скорость дают ноль, а не деление на ноль
-    /// или отрицательную длительность — оба вырожденных случая безопасны для
-    /// вызывающей стороны (см. MarqueeText.offset(at:)), которая иначе
-    /// получила бы NaN или бесконечный цикл нулевой длины.
+    /// A non-positive width or speed yields zero, not division by zero or a
+    /// negative duration — both degenerate cases are safe for the caller
+    /// (see MarqueeText.offset(at:)), which would otherwise get NaN or an
+    /// infinite zero-length cycle.
     public static func passDuration(width: CGFloat, speed: CGFloat) -> TimeInterval {
         guard width > 0, speed > 0 else { return 0 }
         return TimeInterval(width / speed)
     }
 }
 
-/// Бегущая строка: показывает текст неподвижным, пока он влезает, и
-/// прокручивает его слева направо ровным ходом, если нет.
+/// Marquee text: shows the text still while it fits, and scrolls it
+/// left-to-right at a steady pace when it doesn't.
 ///
-/// Измеряет саму себя через `onGeometryChange` (macOS 15+) — единственный
-/// доступный NotchUI способ узнать ширину текста и отведённого ему места:
-/// пакет не импортирует AppKit, поэтому `NSAttributedString`/`NSFont` здесь
-/// недоступны в принципе (Global Constraints плана).
+/// Measures itself via `onGeometryChange` (macOS 15+) — the only NotchUI
+/// way available to learn the text's width and the space allotted to it:
+/// the package doesn't import AppKit, so `NSAttributedString`/`NSFont` are
+/// simply unavailable here (Global Constraints of the plan).
 public struct MarqueeText: View {
     private let text: String
     private let font: Font
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Естественная ширина текста без ограничений — измеряется невидимым
-    /// зондом (см. `widthProbe`), а не самим видимым текстом: видимый текст
-    /// в неподвижной ветке обязан обрезаться по месту, а не растягивать
-    /// раскладку до своей полной длины.
+    /// Natural unconstrained width of the text — measured by an invisible
+    /// probe (see `widthProbe`), not by the visible text itself: in the
+    /// still branch the visible text must truncate to fit, not stretch the
+    /// layout to its full length.
     @State private var textWidth: CGFloat = 0
-    /// Ширина, которую реально выделил родитель. Меряется на внешнем
-    /// контейнере уже после `.frame(maxWidth: .infinity)` — то есть это не
-    /// ширина текста, а именно то место, в которое ему нужно поместиться.
+    /// The width the parent actually allotted. Measured on the outer
+    /// container, after `.frame(maxWidth: .infinity)` — i.e. this isn't the
+    /// text's width, but exactly the space it needs to fit into.
     @State private var availableWidth: CGFloat = 0
-    /// Момент начала текущего цикла прокрутки — точка отсчёта, а не счётчик
-    /// кадров: смещение в любой момент считается от неё заново (см.
-    /// `offset(at:)`), а не накапливается кадр за кадром.
+    /// The start of the current scroll cycle — a reference point, not a
+    /// frame counter: the offset at any moment is computed from it anew
+    /// (see `offset(at:)`), not accumulated frame by frame.
     @State private var startDate = Date()
 
     public init(_ text: String, font: Font) {
@@ -61,9 +64,9 @@ public struct MarqueeText: View {
         self.font = font
     }
 
-    /// Reduce Motion выключает прокрутку целиком независимо от того, влезает
-    /// текст или нет — требование 4 постановки, тот же флаг и то же место
-    /// чтения (`@Environment`), что и в NotchPanelView.
+    /// Reduce Motion turns off scrolling entirely regardless of whether the
+    /// text fits or not — requirement 4 of the spec, the same flag read the
+    /// same way (`@Environment`) as in NotchPanelView.
     private var shouldScroll: Bool {
         !reduceMotion && MarqueeMetrics.shouldScroll(textWidth: textWidth, availableWidth: availableWidth)
     }
@@ -73,10 +76,10 @@ public struct MarqueeText: View {
             if shouldScroll {
                 scrolling
             } else {
-                // Один и тот же неподвижный текст с усечением многоточием —
-                // и для влезающего заголовка (требование 1), и для Reduce
-                // Motion (требование 4): это одно и то же требуемое
-                // состояние, а не два похожих, но разных.
+                // The same still text with ellipsis truncation — for a
+                // title that fits (requirement 1) and for Reduce Motion
+                // (requirement 4) alike: it's one and the same required
+                // state, not two similar-but-different ones.
                 Text(text).font(font).lineLimit(1)
             }
         }
@@ -84,22 +87,24 @@ public struct MarqueeText: View {
         .background(widthProbe)
         .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { availableWidth = $0 }
         .onChange(of: text) { _, _ in
-            // Смена трека — это смена текста: сбрасываем точку отсчёта, и
-            // новое название стартует с паузы у начала, а не с той фазы
-            // прохода, на которой остановилось предыдущее (требование 5).
+            // A track change is a text change: reset the reference point,
+            // so the new title starts with a pause at the beginning, not
+            // from whatever pass phase the previous one stopped at
+            // (requirement 5).
             startDate = Date()
         }
-        // Прокрутка рисует текст двумя копиями подряд (см. scrolling) — без
-        // явного accessibility-элемента VoiceOver прочитал бы его дважды.
+        // Scrolling draws the text as two copies in a row (see scrolling) —
+        // without an explicit accessibility element, VoiceOver would read
+        // it twice.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(text)
     }
 
-    /// Невидимый зонд из того же текста и шрифта, что и видимый.
-    /// `fixedSize()` заставляет его лечь на свою настоящую ширину вместо
-    /// предложенной родителем, а `opacity(0)` прячет его, не убирая из
-    /// раскладки — в отличие от условного `if`, спрятанная так вьюха
-    /// продолжает измеряться.
+    /// An invisible probe made of the same text and font as the visible
+    /// one. `fixedSize()` forces it to lay out at its true width instead of
+    /// the one proposed by the parent, and `opacity(0)` hides it without
+    /// removing it from the layout — unlike a conditional `if`, a view
+    /// hidden this way keeps being measured.
     private var widthProbe: some View {
         Text(text)
             .font(font)
@@ -109,10 +114,11 @@ public struct MarqueeText: View {
             .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { textWidth = $0 }
     }
 
-    /// Два экземпляра текста подряд через `NotchMotion.marqueeGap`: когда
-    /// первый проезжает всю дистанцию прохода, второй как раз занимает его
-    /// стартовое место, и в этот момент `offset(at:)` заново обнуляется —
-    /// глазу это читается как непрерывное движение без шва, а не прыжок.
+    /// Two instances of the text in a row, separated by
+    /// `NotchMotion.marqueeGap`: when the first one travels the whole pass
+    /// distance, the second one is right there taking its starting place,
+    /// and at that moment `offset(at:)` resets back to zero — to the eye
+    /// this reads as continuous seamless movement, not a jump.
     private var scrolling: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: false)) { context in
             HStack(spacing: NotchMotion.marqueeGap) {
@@ -121,30 +127,32 @@ public struct MarqueeText: View {
             }
             .offset(x: offset(at: context.date))
         }
-        // Числовая ширина, а не maxWidth: `.frame(width:)` всегда сообщает
-        // родителю ровно эту цифру, что бы ни лежало внутри. Без неё две
-        // копии текста (fixedSize, вместе шире отведённого места по
-        // построению) продавили бы наверх свою полную ширину, и колонка
-        // плеера растянулась бы под них — ровно то, что запрещает
-        // требование 7.
+        // A fixed numeric width, not maxWidth: `.frame(width:)` always
+        // reports exactly this number to the parent, no matter what's
+        // inside. Without it, the two copies of the text (fixedSize,
+        // together wider than the available space by construction) would
+        // push their full width upward, and the player column would
+        // stretch to fit them — exactly what requirement 7 forbids.
         .frame(width: availableWidth, alignment: .leading)
-        // Рамка выше уже не растёт, но содержимое внутри неё по-прежнему
-        // шире и без клипа рисовалось бы, вылезая за её границы — clipped()
-        // обрезает именно рисование, а не размер, который зафиксирован строкой выше.
+        // The frame above no longer grows, but the content inside it is
+        // still wider and would otherwise draw past its bounds without
+        // clipping — clipped() trims the drawing itself, not the size,
+        // which is already fixed by the line above.
         .clipped()
         .mask(edgeFade)
     }
 
-    /// Смещение в момент `date`: ноль на время паузы, затем равномерный
-    /// сдвиг влево на всю дистанцию прохода за `passDuration`, затем цикл
-    /// начинается заново.
+    /// The offset at moment `date`: zero during the pause, then a uniform
+    /// leftward shift over the whole pass distance across `passDuration`,
+    /// then the cycle starts over.
     ///
-    /// Чистая функция времени, а не хранимое состояние смещения — поэтому
-    /// паузе и повтору неоткуда рассинхронизироваться между кадрами
-    /// TimelineView, и здесь же, а не в отдельной пружине или `.animation`,
-    /// потому что нужно строго линейное движение без ускорений (требование
-    /// 2), а не кривая NotchMotion — они для переходов между состояниями
-    /// панели, а не для равномерного хода бегущей строки.
+    /// A pure function of time, not stored offset state — so the pause and
+    /// the repeat have nowhere to drift out of sync between TimelineView
+    /// frames, and it's computed right here rather than via a separate
+    /// spring or `.animation`, because strictly linear motion without
+    /// easing is required (requirement 2), not a NotchMotion curve — those
+    /// are for transitions between panel states, not for the marquee's
+    /// steady pace.
     private func offset(at date: Date) -> CGFloat {
         let distance = textWidth + NotchMotion.marqueeGap
         let duration = MarqueeMetrics.passDuration(width: distance, speed: NotchMotion.marqueeSpeed)
@@ -156,13 +164,14 @@ public struct MarqueeText: View {
         return -CGFloat(progress) * distance
     }
 
-    /// Растворение по краям — маска, а не подложенная плашка: `.mask` режет
-    /// альфу самого текста, поэтому под краями честно проступает то, что на
-    /// самом деле позади (чёрный фон панели «Обсидиана»), а не имитация
-    /// цветом поверх текста (требование 3 и правило «Обсидиана» про плашки).
-    /// Ширина растворения переводится в долю от `availableWidth`, потому что
-    /// `LinearGradient` со `.leading`/`.trailing` задаётся в единичных
-    /// координатах (0...1), а не в точках.
+    /// Edge fade — a mask, not an overlaid plate: `.mask` cuts the alpha of
+    /// the text itself, so what's honestly behind it (the "Obsidian"
+    /// panel's black background) shows through at the edges, rather than
+    /// faking it with color over the text (requirement 3 and the
+    /// "Obsidian" rule about plates). The fade width is converted to a
+    /// fraction of `availableWidth`, because `LinearGradient` with
+    /// `.leading`/`.trailing` is specified in unit coordinates (0...1), not
+    /// points.
     private var edgeFade: some View {
         let fraction = availableWidth > 0 ? min(NotchMotion.marqueeEdgeFade / availableWidth, 0.5) : 0
         return LinearGradient(

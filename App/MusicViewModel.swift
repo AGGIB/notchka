@@ -4,11 +4,11 @@ import SwiftUI
 import MediaBridge
 import NotchUI
 
-/// Держит текущий трек и переводит его в то, что показывает вкладка музыки.
+/// Holds the current track and translates it into what the music tab shows.
 ///
-/// Живёт весь срок работы приложения — создаётся один раз в AppDelegate и не
-/// привязана к геометрии чёлки: адаптеру и его perl-подпроцессу нет дела до
-/// того, куда сейчас смотрит панель или есть ли у экрана вырез вообще.
+/// Lives for the app's entire lifetime — created once in AppDelegate and not
+/// tied to the notch geometry: the adapter and its perl subprocess don't care
+/// where the panel is currently looking or whether the screen has a notch at all.
 @MainActor
 @Observable
 final class MusicViewModel {
@@ -25,22 +25,21 @@ final class MusicViewModel {
         self.provider = provider
     }
 
-    /// Поднимает насос подписки. Вызывать один раз за жизнь модели.
+    /// Starts the subscription pump. Call once per model lifetime.
     ///
-    /// `AdapterProvider.snapshots` не мультикастит (см. её doc-комментарий):
-    /// повторная подписка разделила бы уже идущие снимки между двумя
-    /// читателями вместо дублирования их обоим. Защита ниже делает start()
-    /// идемпотентным — вызывающая сторона (AppDelegate) сама зовёт его
-    /// ровно один раз, но пусть это гарантирует и сам метод, а не только
-    /// дисциплина вызывающего.
+    /// `AdapterProvider.snapshots` doesn't multicast (see its doc comment):
+    /// subscribing again would split the already-flowing snapshots between two
+    /// readers instead of duplicating them to both. The guard below makes start()
+    /// idempotent — the caller (AppDelegate) already calls it exactly once, but
+    /// the method itself should guarantee that too, not just caller discipline.
     func start() {
         guard pump == nil else { return }
         pump = Task { [weak self] in
             guard let self else { return }
-            // Task {}, созданный внутри @MainActor-метода, сам изолирован на
-            // MainActor (наследует изоляцию места создания) — второй прыжок
-            // через MainActor.run здесь был бы лишним поверх уже верного
-            // актора, а не дополнительной гарантией.
+            // A Task {} created inside a @MainActor method is itself isolated
+            // to MainActor (it inherits the isolation of its creation site) —
+            // an extra hop through MainActor.run here would be redundant on
+            // top of an already-correct actor, not an added guarantee.
             for await snapshot in await provider.snapshots {
                 apply(snapshot)
             }
@@ -48,100 +47,102 @@ final class MusicViewModel {
     }
 
     deinit {
-        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit: deinit
-        // класса на @MainActor компилятор считает nonisolated, поэтому
-        // прямое обращение к pump здесь не пройдёт проверку Swift 6 без
-        // явного assumeIsolated.
+        // Same trick and same rationale as HotkeyCenter.deinit: the compiler
+        // treats a class deinit on @MainActor as nonisolated, so a direct
+        // reference to pump here wouldn't pass Swift 6 checking without an
+        // explicit assumeIsolated.
         MainActor.assumeIsolated {
             pump?.cancel()
         }
     }
 
-    /// Гарантированно останавливает адаптер перед выходом из приложения.
+    /// Guaranteed stop of the adapter before the app quits.
     ///
-    /// Отдельно от deinit не только формально (deinit не async и не может
-    /// дождаться завершения provider.shutdown()), но и по существу: полагаться
-    /// на то, что deinit вообще выполнится, нельзя — AppKit завершает процесс
-    /// через exit(), в обход раскрутки стека Swift. Вызывающая сторона
-    /// (AppDelegate, обработчик SIGTERM) обязана дождаться этого метода,
-    /// прежде чем реально завершать процесс.
+    /// Separate from deinit not just formally (deinit isn't async and can't
+    /// wait for provider.shutdown() to finish), but substantively: you can't
+    /// rely on deinit ever running — AppKit terminates the process via
+    /// exit(), bypassing Swift's stack unwinding. The caller (AppDelegate,
+    /// the SIGTERM handler) must await this method before actually
+    /// terminating the process.
     func stopAdapter() async {
         pump?.cancel()
         await provider.shutdown()
     }
 
-    /// Позиция пересчитывается по запросу, а не хранится тикающей: адаптер
-    /// отдаёт её снимком и между событиями не обновляет (см.
-    /// PlaybackPosition), поэтому единственный честный способ — считать от
-    /// метки времени заново при каждом вызове. Вызывающая сторона
-    /// (NotchRootView) обязана дёргать это только пока панель раскрыта — в
-    /// покое приложение обязано спать, а не пересчитывать позицию трека,
-    /// который никто не видит.
+    /// Position is recomputed on demand rather than kept ticking: the adapter
+    /// hands it over as a snapshot and doesn't update it between events (see
+    /// PlaybackPosition), so the only honest approach is to recompute from
+    /// the timestamp on every call. The caller (NotchRootView) must only
+    /// invoke this while the panel is expanded — at rest the app should
+    /// sleep, not recompute the position of a track nobody is watching.
     func refreshPosition(now: Date = Date()) {
         guard let snapshot else { return }
         position = PlaybackPosition.current(in: snapshot, at: now)
     }
 
-    /// Разовая пересинхронизация в обход потока и его накопителя.
+    /// One-off resync that bypasses the stream and its pump.
     ///
-    /// Существует ради дефекта, найденного владельцем на живой машине:
-    /// короткое уведомление со звуком (например, WhatsApp Web) перехватывает
-    /// сессию «сейчас играет», а по его завершении система иногда не
-    /// присылает событие о возврате к прежнему источнику — долгоживущий
-    /// поток адаптера в этот момент жив, но навсегда застревает на данных
-    /// уведомления, потому что событию просто неоткуда взяться. Починить это
-    /// разбором того, что уже пришло по потоку, нельзя: там ничего нет (см.
-    /// doc NowPlayingProvider.refresh()).
+    /// Exists because of a defect the owner found on a live machine: a short
+    /// notification with sound (e.g. WhatsApp Web) hijacks the "now playing"
+    /// session, and once it ends the system sometimes doesn't send an event
+    /// for returning to the previous source — the adapter's long-lived
+    /// stream is still alive at that point, but stays stuck on the
+    /// notification's data forever, because there's simply nowhere for that
+    /// event to come from. This can't be fixed by parsing what already
+    /// arrived on the stream: there's nothing there (see the doc on
+    /// NowPlayingProvider.refresh()).
     ///
-    /// Результат применяется через apply(_:) — тем же путём, каким сюда
-    /// попадают обычные снимки из потока в start(): трек, обложка, акцент и
-    /// позиция обновляются одинаково независимо от источника значения.
-    /// Вызывающая сторона (NotchRootView) обязана дёргать это только пока
-    /// панель раскрыта — тот же принцип «спать в покое», что и у
-    /// refreshPosition() выше: get поднимает отдельный процесс perl, и
-    /// оправдан он только тогда, когда результат вообще кто-то увидит.
+    /// The result is applied through apply(_:) — the same path regular
+    /// snapshots take from the stream in start(): track, artwork, accent,
+    /// and position update the same way regardless of where the value came
+    /// from. The caller (NotchRootView) must only invoke this while the
+    /// panel is expanded — the same "sleep at rest" principle as
+    /// refreshPosition() above: get spawns a separate perl process, and it's
+    /// only justified when someone will actually see the result.
     func resync() async {
         do {
             apply(try await provider.refresh())
         } catch {
-            // Осечка разового запроса — не повод гасить экран: последний
-            // известный трек честнее пустоты. Провайдер уже записал причину
-            // в журнал, дублировать её здесь нечем.
+            // A misfire on a one-off request isn't a reason to blank the
+            // screen: the last known track is more honest than emptiness.
+            // The provider already logged the reason — nothing to duplicate here.
         }
     }
 
-    /// Разворачивает/приостанавливает воспроизведение.
+    /// Toggles play/pause.
     ///
-    /// Раньше это была единственная команда, которой управлял UI, и здесь
-    /// же объяснялось, почему для неё нет типа TrackControl: кнопки
-    /// перемотки были убраны из MusicTabView (см. тогдашний doc у
-    /// playPauseButton там) вместе с TrackControl (previous/playPause/next)
-    /// — обе стрелки слали тот же код toggle, что и play/pause, потому что
-    /// спайк коды переключения треков эмпирически не проверял, а раз других
-    /// команд не осталось, в enum и switch по нему тоже не было нужды.
+    /// This used to be the only command the UI drove, and this doc used to
+    /// explain why there's no TrackControl type for it: the skip buttons had
+    /// been removed from MusicTabView (see the doc that was on
+    /// playPauseButton there at the time) along with TrackControl
+    /// (previous/playPause/next) — both arrows sent the same toggle code as
+    /// play/pause, because the spike never empirically verified the
+    /// track-switching codes, and with no other commands left there was no
+    /// need for an enum and a switch over it either.
     ///
-    /// Коды next/previous с тех пор подтверждены отдельно (см. doc
-    /// MediaCommand), кнопки вернулись — см. nextTrack()/previousTrack()
-    /// ниже. TrackControl намеренно не восстановлен: с тремя командами он
-    /// был бы просто вторым именем для того же набора значений, что уже
-    /// есть в MediaCommand, без собственной семантики поверх него — UI и
-    /// так вызывает три разных метода на три разных нажатия, оборачивать их
-    /// в четвёртый enum, который тут же разбирается обратно switch'ем на те
-    /// же три MediaCommand, нечего.
+    /// The next/previous codes have since been confirmed separately (see the
+    /// doc on MediaCommand), and the buttons are back — see
+    /// nextTrack()/previousTrack() below. TrackControl was deliberately not
+    /// restored: with three commands it would just be a second name for the
+    /// same set of values that MediaCommand already has, with no semantics
+    /// of its own on top of it — the UI already calls three different
+    /// methods for three different taps, and there's no point wrapping them
+    /// in a fourth enum that immediately gets unwrapped again by a switch
+    /// over those same three MediaCommand values.
     func togglePlayback() {
         Task { try? await provider.send(.toggle) }
     }
 
-    /// Следующий трек. Код — см. MediaCommand.next.adapterCode; там же doc
-    /// о том, как и кем он подтверждён (не тем же спайком, что play/pause/
-    /// toggle).
+    /// Next track. Code — see MediaCommand.next.adapterCode; that doc also
+    /// covers how and by whom it was confirmed (not the same spike as
+    /// play/pause/toggle).
     func nextTrack() {
         Task { try? await provider.send(.next) }
     }
 
-    /// Предыдущий трек. Код — см. MediaCommand.previous.adapterCode; там же
-    /// doc о том, как и кем он подтверждён (не тем же спайком, что
-    /// play/pause/toggle).
+    /// Previous track. Code — see MediaCommand.previous.adapterCode; that
+    /// doc also covers how and by whom it was confirmed (not the same spike
+    /// as play/pause/toggle).
     func previousTrack() {
         Task { try? await provider.send(.previous) }
     }
@@ -177,25 +178,25 @@ final class MusicViewModel {
         if let colour = ArtworkAccent.color(from: cgImage) { accent = colour }
     }
 
-    /// Человеческое имя источника вместо bundle id.
+    /// Human-readable source name instead of a bundle id.
     ///
-    /// Safari — и в принципе любой браузер, рендерящий медиа в отдельном
-    /// вспомогательном процессе — отдаёт MediaRemote bundle id именно этого
-    /// процесса, а не свой собственный. Эмпирическая находка Task 4:
-    /// `sourceBundleID == "com.apple.WebKit.GPU"` для Safari, настоящее
-    /// приложение приходит отдельным полем, `parentApplicationBundleID`.
+    /// Safari — and in principle any browser that renders media in a
+    /// separate helper process — hands MediaRemote the bundle id of that
+    /// process, not its own. Empirical finding from Task 4:
+    /// `sourceBundleID == "com.apple.WebKit.GPU"` for Safari, the real app
+    /// arrives in a separate field, `parentApplicationBundleID`.
     ///
-    /// Здесь сознательно используется это поле, присланное адаптером, а не
-    /// жёстко зашитая таблица «известный helper → имя»: такая таблица решала
-    /// бы задачу только для уже виденных браузеров и воспроизводила бы эту
-    /// же ошибку для любого прежде не встречавшегося вспомогательного
-    /// процесса. Когда parentApplicationBundleID есть — используем его.
-    /// Когда его нет (sourceBundleID уже и есть настоящее приложение, или
-    /// адаптер не распознал в источнике чей-то помощник), используем
-    /// sourceBundleID как раньше; если и он не резолвится в приложение через
-    /// NSWorkspace, показываем bundle id текстом как есть — не самое
-    /// красивое, но честное поведение, не хуже того, что было до этой
-    /// задачи для любого нераспознанного источника.
+    /// This deliberately uses that field as sent by the adapter, rather than
+    /// a hardcoded "known helper → name" table: such a table would only
+    /// solve the problem for browsers already seen and would reproduce the
+    /// same bug for any helper process not previously encountered. When
+    /// parentApplicationBundleID is present — use it. When it's absent
+    /// (sourceBundleID is already the real app, or the adapter didn't
+    /// recognize the source as someone's helper), fall back to
+    /// sourceBundleID as before; if that also doesn't resolve to an app via
+    /// NSWorkspace, show the bundle id as plain text — not the prettiest,
+    /// but honest behavior, no worse than what existed before this task for
+    /// any unrecognized source.
     private static func sourceName(for snapshot: NowPlayingSnapshot) -> String {
         let bundleID = snapshot.parentApplicationBundleID ?? snapshot.sourceBundleID
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {

@@ -2,14 +2,14 @@ import AppKit
 import Carbon.HIToolbox
 import NotchCore
 
-/// Перевод `NSEvent` в термины `NotchCore.KeyBinding` — единственное место
-/// в приложении, где код клавиши AppKit встречается с `PanelKey`. Раскладка
-/// (KeyBinding) намеренно ничего не знает про AppKit, поэтому мост живёт
-/// здесь, в app-таргете.
+/// Translates `NSEvent` into `NotchCore.KeyBinding` terms — the single place
+/// in the app where an AppKit key code meets `PanelKey`. The layout
+/// (KeyBinding) intentionally knows nothing about AppKit, so the bridge lives
+/// here, in the app target.
 enum PanelKeyHandler {
-    /// Коды клавиш — из Carbon.HIToolbox (kVK_*), а не магические числа:
-    /// раскладка клавиатуры может быть любой, но физическое расположение
-    /// клавиш (и их virtual keyCode) от неё не зависит.
+    /// Key codes come from Carbon.HIToolbox (kVK_*), not magic numbers:
+    /// the keyboard layout can be anything, but the physical position of
+    /// keys (and their virtual keyCode) doesn't depend on it.
     static func panelKey(for event: NSEvent) -> PanelKey {
         switch event.keyCode {
         case UInt16(kVK_ANSI_1): .digit1
@@ -22,9 +22,9 @@ enum PanelKeyHandler {
         }
     }
 
-    /// Из всего `NSEvent.ModifierFlags` раскладке нужны только три —
-    /// остальные (control, function, caps lock и т.д.) ни на одно
-    /// сочетание в KeyBinding не влияют.
+    /// Of all `NSEvent.ModifierFlags`, the layout only needs three —
+    /// the rest (control, function, caps lock, etc.) don't affect any
+    /// combination in KeyBinding.
     static func panelModifiers(for event: NSEvent) -> PanelModifiers {
         var modifiers: PanelModifiers = []
         if event.modifierFlags.contains(.command) { modifiers.insert(.command) }

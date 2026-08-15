@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Силуэт панели: прямоугольник, прижатый к верхней кромке экрана,
-/// с округлыми нижними углами и вогнутыми верхними.
+/// Panel silhouette: a rectangle pressed against the top edge of the screen,
+/// with rounded bottom corners and concave top corners.
 ///
-/// Вогнутые углы — главная деталь: они делают стык с корпусом литым,
-/// как будто панель вытекает из выреза, а не лежит поверх него.
+/// The concave corners are the key detail: they make the seam with the chassis look molded,
+/// as if the panel flows out of the notch rather than sitting on top of it.
 public struct NotchShape: Shape {
     public var width: CGFloat
     public var height: CGFloat
@@ -18,10 +18,10 @@ public struct NotchShape: Shape {
         self.concaveRadius = concaveRadius
     }
 
-    /// concaveRadius сегодня константа во всех вызывающих местах, поэтому
-    /// его отсутствие здесь было незаметно молчаливым скачком; следующий
-    /// план обоснованно предположит, что публичный var анимируется, как
-    /// остальные три поля, — поэтому он тоже часть animatableData.
+    /// concaveRadius is a constant at every call site today, so its
+    /// absence here would be a silent, easy-to-miss gap; a future
+    /// plan will reasonably assume a public var animates like the
+    /// other three fields — so it's part of animatableData too.
     public var animatableData: AnimatablePair<AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat>, CGFloat> {
         get {
             AnimatablePair(AnimatablePair(AnimatablePair(width, height), bottomRadius), concaveRadius)
@@ -35,7 +35,7 @@ public struct NotchShape: Shape {
     }
 
     public func path(in rect: CGRect) -> Path {
-        // Радиусы не должны съедать фигуру целиком на маленьких размерах.
+        // Radii must not consume the whole shape at small sizes.
         let bottom = min(bottomRadius, height / 2, width / 2)
         let concave = min(concaveRadius, height / 2, width / 2)
 
@@ -46,7 +46,7 @@ public struct NotchShape: Shape {
 
         var path = Path()
         path.move(to: CGPoint(x: left - concave, y: top))
-        // Левый вогнутый угол: дуга выгибается внутрь панели.
+        // Left concave corner: the arc curves inward into the panel.
         path.addQuadCurve(
             to: CGPoint(x: left, y: top + concave),
             control: CGPoint(x: left, y: top)
@@ -62,8 +62,8 @@ public struct NotchShape: Shape {
             control: CGPoint(x: right, y: bottomY)
         )
         path.addLine(to: CGPoint(x: right, y: top + concave))
-        // Правый вогнутый угол: зеркало левого — стык с меню-баром должен
-        // выглядеть литым с обеих сторон, а не только слева.
+        // Right concave corner: mirrors the left — the seam with the menu bar should
+        // look molded on both sides, not just the left.
         path.addQuadCurve(
             to: CGPoint(x: right + concave, y: top),
             control: CGPoint(x: right, y: top)

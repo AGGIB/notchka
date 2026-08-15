@@ -2,27 +2,27 @@ import Testing
 import Foundation
 @testable import MediaBridge
 
-/// Корень репозитория относительно файла теста.
+/// Repository root relative to the test file.
 ///
-/// От самого файла до корня — пять уровней: файл лежит в
-/// Packages/NotchKit/Tests/MediaBridgeTests/, и каждый вызов снимает один
-/// компонент пути (включая имя файла на первом шаге).
+/// Five levels from the file itself to the root: the file lives in
+/// Packages/NotchKit/Tests/MediaBridgeTests/, and each call strips one
+/// path component (including the file name on the first step).
 private var repoRoot: URL {
     URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()  // AdapterProcessIntegrationTests.swift -> MediaBridgeTests
         .deletingLastPathComponent()  // MediaBridgeTests -> Tests
         .deletingLastPathComponent()  // Tests -> NotchKit
         .deletingLastPathComponent()  // NotchKit -> Packages
-        .deletingLastPathComponent()  // Packages -> корень репозитория
+        .deletingLastPathComponent()  // Packages -> repository root
 }
 
-/// Общие пути для тестов файла — вынесены, чтобы условие трейта
-/// `.enabled(if:)` и тело теста не расходились в том, что считают путём.
+/// Shared paths for the file's tests — factored out so the `.enabled(if:)`
+/// trait condition and the test body don't disagree on what counts as the path.
 private var adapterPaths: AdapterPaths {
     AdapterPaths.vendored(repoRoot: repoRoot)
 }
 
-@Test("пути к вендоренному адаптеру абсолютны")
+@Test("vendored adapter paths are absolute")
 func vendoredPathsAreAbsolute() {
     let paths = adapterPaths
     #expect(paths.script.path.hasPrefix("/"))
@@ -30,15 +30,16 @@ func vendoredPathsAreAbsolute() {
     #expect(paths.perl.path == "/usr/bin/perl")
 }
 
-/// Требует собранного фреймворка. Пропускается через трейт `.enabled(if:)`,
-/// а не через провал `#require`: условие трейта вычисляется ДО тела теста,
-/// и Swift Testing честно помечает тест как skipped, а не failed. Провал
-/// `#require` внутри тела — это всегда упавший тест, а не пропущенный, как
-/// показал первый прогон этого файла (не собран адаптер → красный тест
-/// с текстом «пропущен» в сообщении об ошибке, что вводит в заблуждение).
+/// Requires a built framework. Skipped via the `.enabled(if:)` trait,
+/// not via a `#require` failure: the trait condition is evaluated BEFORE
+/// the test body, so Swift Testing honestly marks the test as skipped
+/// rather than failed. A `#require` failure inside the body is always a
+/// failed test, not a skipped one, as the first run of this file showed
+/// (adapter not built → red test with "skipped" text in the error message,
+/// which is misleading).
 @Test(
-    "поток адаптера отдаёт хотя бы одну разобранную строку",
-    .enabled(if: adapterPaths.existsOnDisk, "адаптер не собран, тест пропущен")
+    "adapter stream yields at least one parsed line",
+    .enabled(if: adapterPaths.existsOnDisk, "adapter not built, test skipped")
 )
 func streamYieldsParsedLine() async throws {
     let paths = adapterPaths
@@ -52,16 +53,17 @@ func streamYieldsParsedLine() async throws {
     #expect(received != nil)
 }
 
-/// Разовый `get` против настоящего процесса — то же обоснование трейта, что
-/// у streamYieldsParsedLine() выше. Не проверяет содержимое снимка: играет
-/// ли что-то прямо сейчас на машине, где запущен тест, — состояние среды,
-/// а не свойство кода, и nil («сейчас ничего не играет»), и непустой снимок
-/// — оба легитимные исходы живого запроса. Проверяется то, что без
-/// настоящего процесса не проверить никак: что запрос к живому адаптеру
-/// доезжает до конца (не бросает, не виснет на чтении трубы вывода).
+/// A one-shot `get` against a real process — same trait rationale as
+/// streamYieldsParsedLine() above. Doesn't check the snapshot's contents:
+/// whether something is playing right now on the machine running the test
+/// is environment state, not a property of the code, and both nil ("nothing
+/// is playing right now") and a non-empty snapshot are legitimate outcomes
+/// of a live request. What's being checked is what can't be checked any
+/// other way without a real process: that a request to the live adapter
+/// runs to completion (doesn't throw, doesn't hang reading the output pipe).
 @Test(
-    "get не виснет и отдаёт распознанный ответ живого адаптера",
-    .enabled(if: adapterPaths.existsOnDisk, "адаптер не собран, тест пропущен")
+    "get doesn't hang and returns a recognized response from the live adapter",
+    .enabled(if: adapterPaths.existsOnDisk, "adapter not built, test skipped")
 )
 func getReturnsStateFromLiveAdapter() async throws {
     let paths = adapterPaths

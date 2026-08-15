@@ -5,73 +5,72 @@
 <h1 align="center">Notchka</h1>
 
 <p align="center">
-  Чёлка MacBook как интерактивная панель: музыка из любого источника, история буфера обмена,
-  быстрые заметки и закреплённые сниппеты — в одном месте, без единого сетевого запроса.
+  Your MacBook's notch as an interactive panel: music from any source, clipboard history,
+  quick notes, and pinned snippets — all in one place, with zero network requests.
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/panel-expanded-music.png" width="640" alt="Раскрытая панель Notchka, вкладка музыки">
+  <img src="docs/screenshots/panel-expanded-music.png" width="640" alt="Notchka's expanded panel, music tab">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/panel-peek.png" width="360" alt="Notchka в состоянии peek — наведение на чёлку">
+  <img src="docs/screenshots/panel-peek.png" width="360" alt="Notchka in peek state — hovering over the notch">
 </p>
 
-## Возможности
+## Features
 
-- **Музыка из любого источника** — Apple Music, Spotify, YouTube в браузере: пауза,
-  переключение треков, обложка и прогресс — без установки расширений.
-- **История буфера обмена** — текст, изображения, файлы с указанием источника.
-  Копирование из менеджеров паролей в ленту не попадает.
-- **Быстрые заметки** — короткий текст под рукой, без отдельного приложения.
-- **Закреплённые сниппеты** — почта, номер телефона и другие часто вставляемые значения,
-  с маскировкой чувствительных полей. Клик вставляет значение в активное приложение,
-  `⌥`+клик — только копирует.
-- **Общий поиск** — один запрос находит запись из буфера, заметку и пин одновременно.
-- **Наведение или хоткей** — `⌥Space` раскрывает панель из любого места; наведение курсора
-  на чёлку показывает превью без клика.
+- **Music from any source** — Apple Music, Spotify, YouTube in the browser: pause,
+  skip tracks, cover art, and progress — no extensions required.
+- **Clipboard history** — text, images, files with source attribution.
+  Copies from password managers never enter the feed.
+- **Quick notes** — short text at your fingertips, no separate app needed.
+- **Pinned snippets** — email, phone number, and other frequently pasted values,
+  with masking for sensitive fields. Click to paste the value into the active app,
+  `⌥`+click to just copy.
+- **Unified search** — one query finds a clipboard entry, a note, and a pin at once.
+- **Hover or hotkey** — `⌥Space` expands the panel from anywhere; hovering the cursor
+  over the notch shows a preview without clicking.
 
-Панель — не постоянно висящее окно: она живёт поверх физического выреза экрана и
-раскрывается только когда нужна. В остальное время не потребляет заметного CPU.
+The panel isn't a permanently floating window — it lives on top of the screen's physical
+notch and expands only when needed. The rest of the time it uses no noticeable CPU.
 
 <p align="center">
-  <img src="docs/screenshots/panel-notes.png" width="320" alt="Вкладка быстрых заметок">
-  <img src="docs/screenshots/panel-pins.png" width="320" alt="Вкладка закреплённых пинов">
+  <img src="docs/screenshots/panel-notes.png" width="320" alt="Quick notes tab">
+  <img src="docs/screenshots/panel-pins.png" width="320" alt="Pinned snippets tab">
 </p>
 
-## Установка
+## Installation
 
-1. Скачайте последний `Notchka-x.y.z.dmg` со страницы [Releases](../../releases).
-2. Откройте DMG и перетащите `Notchka.app` в `Applications`.
-3. Запустите Notchka из Applications. Значка в Dock не будет — это фоновое
-   приложение-агент, оно живёт только в области чёлки.
+1. Download the latest `Notchka-x.y.z.dmg` from the [Releases](../../releases) page.
+2. Open the DMG and drag `Notchka.app` into `Applications`.
+3. Launch Notchka from Applications. There's no Dock icon — it's a background
+   agent app that lives only in the notch area.
 
-Сборка подписана Developer ID и нотаризована Apple, поэтому Gatekeeper открывает её без
-дополнительных шагов.
+The build is signed with a Developer ID and notarized by Apple, so Gatekeeper opens it
+without extra steps.
 
-### Разрешение Accessibility
+### Accessibility permission
 
-При первом клике по закреплённому сниппету или записи буфера macOS попросит разрешение
-**Accessibility** — оно нужно ровно для одного действия: программной вставки (`⌘V`) в
-активное приложение. Без этого разрешения вставка недоступна, но копирование в буфер
-работает как обычно — Notchka объяснит это прямо в интерфейсе со ссылкой на нужный раздел
-System Settings.
+On the first click of a pinned snippet or clipboard entry, macOS will ask for
+**Accessibility** permission — it's needed for exactly one action: programmatic paste
+(`⌘V`) into the active app. Without this permission, pasting is unavailable, but copying
+to the clipboard still works as usual — Notchka explains this right in the interface with
+a link to the relevant section of System Settings.
 
-Наведение на чёлку и глобальный хоткей `⌥Space` разрешений не требуют.
+Hovering over the notch and the global `⌥Space` hotkey require no permissions.
 
-## Приватность
+## Privacy
 
-- Notchka не делает ни одного сетевого запроса. Ни телеметрии, ни аналитики, ни проверки
-  обновлений.
-- Все данные — история буфера, заметки, пины — хранятся локально в
-  `~/Library/Application Support/kz.mobilefirst.notchka/notch.sqlite` (SQLite, без
-  шифрования — файл защищён только правами доступа файловой системы уровня пользователя).
-- Счётчик скачиваний DMG, который виден на странице релизов, считает GitHub на своей
-  стороне — приложение об этом ничего не знает и никак в этом не участвует.
+- Notchka makes zero network requests. No telemetry, no analytics, no update checks.
+- All data — clipboard history, notes, pins — is stored locally in
+  `~/Library/Application Support/kz.mobilefirst.notchka/notch.sqlite` (SQLite, unencrypted
+  — the file is protected only by user-level filesystem permissions).
+- The DMG download counter visible on the releases page is tracked by GitHub on its
+  own side — the app knows nothing about it and plays no part in it.
 
-## Сборка из исходников
+## Building from source
 
-Требования: macOS 26+, Xcode 26.6+, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Requirements: macOS 26+, Xcode 26.6+, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```bash
 git clone https://github.com/AGGIB/notchka.git
@@ -80,29 +79,29 @@ xcodegen generate
 open Notchka.xcodeproj
 ```
 
-Проект собирается и без личной подписи (ad-hoc по умолчанию в `project.yml`) — подходит
-для чтения кода и локальных правок. Для стабильной локальной подписи (важно для того,
-чтобы разрешение Accessibility не запрашивалось заново после каждой пересборки) передайте
-свою идентичность аргументами сборки:
+The project builds without a personal signing identity too (ad-hoc by default in
+`project.yml`) — fine for reading the code and local tweaks. For a stable local
+signature (important so the Accessibility permission isn't requested again after every
+rebuild), pass your identity as build arguments:
 
 ```bash
 xcodebuild -project Notchka.xcodeproj -scheme Notchka \
   CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=<your-team-id> build
 ```
 
-### Сборка DMG
+### Building the DMG
 
 ```bash
-CODE_SIGN_IDENTITY="Developer ID Application: Имя (TEAMID)" \
+CODE_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" \
 DEVELOPMENT_TEAM=<TEAMID> \
 NOTARIZE=1 NOTARY_KEYCHAIN_PROFILE=<profile> \
 ./scripts/build-dmg.sh
 ```
 
-Без `NOTARIZE=1` скрипт соберёт DMG с ad-hoc или указанной подписью, но без нотаризации —
-подходит для локальной проверки, не для публичной раздачи.
+Without `NOTARIZE=1` the script will build the DMG with an ad-hoc or specified signature,
+but without notarization — fine for local testing, not for public distribution.
 
-## Лицензия
+## License
 
-MIT — см. [LICENSE](LICENSE). Сторонние зависимости и их лицензии перечислены в
+MIT — see [LICENSE](LICENSE). Third-party dependencies and their licenses are listed in
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) (GRDB.swift, mediaremote-adapter).

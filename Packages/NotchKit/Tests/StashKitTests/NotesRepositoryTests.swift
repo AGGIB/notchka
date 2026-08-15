@@ -12,38 +12,38 @@ private func makeRepository() throws -> NotesRepository {
     return NotesRepository(database: database)
 }
 
-@Test("заметка сохраняется и читается")
+@Test("a note round-trips through save and read")
 func noteRoundTrips() throws {
     let repository = try makeRepository()
-    try repository.add("созвон в 15:00", at: t0)
-    #expect(try repository.all().map(\.body) == ["созвон в 15:00"])
+    try repository.add("call at 3pm", at: t0)
+    #expect(try repository.all().map(\.body) == ["call at 3pm"])
 }
 
-@Test("свежие заметки идут первыми")
+@Test("newest notes come first")
 func newestFirst() throws {
     let repository = try makeRepository()
-    try repository.add("первая", at: t0)
-    try repository.add("вторая", at: t0.addingTimeInterval(60))
-    #expect(try repository.all().map(\.body) == ["вторая", "первая"])
+    try repository.add("first", at: t0)
+    try repository.add("second", at: t0.addingTimeInterval(60))
+    #expect(try repository.all().map(\.body) == ["second", "first"])
 }
 
-@Test("правка меняет текст и время изменения, но не время создания")
+@Test("editing changes the text and update time, not the creation time")
 func updateKeepsCreationTime() throws {
     let repository = try makeRepository()
-    try repository.add("черновик", at: t0)
+    try repository.add("draft", at: t0)
     let note = try #require(try repository.all().first)
-    try repository.update(id: note.id!, body: "готово", at: t0.addingTimeInterval(600))
+    try repository.update(id: note.id!, body: "done", at: t0.addingTimeInterval(600))
 
     let updated = try #require(try repository.all().first)
-    #expect(updated.body == "готово")
+    #expect(updated.body == "done")
     #expect(updated.createdAt == t0)
     #expect(updated.updatedAt == t0.addingTimeInterval(600))
 }
 
-/// Бросает, а не молча ничего не делает: вызывающий код должен уметь
-/// отличить «сохранено» от «отклонено», чтобы, например, не очищать поле
-/// ввода после пустого ⌘↩.
-@Test("пустая заметка не сохраняется — бросает EmptyBodyError")
+/// Throws instead of silently doing nothing: calling code needs to be able
+/// to tell "saved" from "rejected" apart, so it doesn't, for example, clear
+/// the input field after an empty ⌘↩.
+@Test("an empty note is not saved — throws EmptyBodyError")
 func emptyNoteIsRejected() throws {
     let repository = try makeRepository()
     #expect(throws: NotesRepository.EmptyBodyError.self) {
@@ -52,35 +52,35 @@ func emptyNoteIsRejected() throws {
     #expect(try repository.all().isEmpty)
 }
 
-/// Тот же отказ, тем же способом, что и на создании — throw, а не тихий
-/// возврат старого содержимого.
-@Test("пустая правка не применяется — бросает EmptyBodyError")
+/// Same rejection, the same way, as on creation — throw, not a silent
+/// fallback to the old content.
+@Test("an empty edit is not applied — throws EmptyBodyError")
 func emptyUpdateIsRejected() throws {
     let repository = try makeRepository()
-    try repository.add("исходный текст", at: t0)
+    try repository.add("original text", at: t0)
     let note = try #require(try repository.all().first)
 
     #expect(throws: NotesRepository.EmptyBodyError.self) {
         try repository.update(id: try #require(note.id), body: "   ", at: t0.addingTimeInterval(60))
     }
-    #expect(try repository.all().first?.body == "исходный текст")
+    #expect(try repository.all().first?.body == "original text")
 }
 
-@Test("удаление убирает заметку")
+@Test("deleting removes the note")
 func deleteRemovesNote() throws {
     let repository = try makeRepository()
-    try repository.add("удалить", at: t0)
+    try repository.add("delete me", at: t0)
     let note = try #require(try repository.all().first)
     try repository.delete(id: note.id!)
     #expect(try repository.all().isEmpty)
 }
 
-@Test("заметка попадает в поисковый индекс и уходит из него при удалении")
+@Test("a note lands in the search index and leaves it on delete")
 func noteIsIndexed() throws {
     let database = try NotchDatabase(location: .temporary())
     try database.migrate()
     let repository = NotesRepository(database: database)
-    try repository.add("уникальноеслово", at: t0)
+    try repository.add("uniqueword", at: t0)
 
     let indexed = try database.queue.read { db in
         try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM search_index WHERE owner_kind = 'note'") ?? 0
@@ -95,21 +95,22 @@ func noteIsIndexed() throws {
     #expect(afterDelete == 0)
 }
 
-/// Правка обязана доезжать до индекса, а не только до самой заметки.
+/// An edit must reach the index, not just the note itself.
 ///
-/// Без этого поиск продолжал бы находить заметку по старому тексту и не
-/// находил бы по новому — молча, потому что и запись, и поиск по
-/// отдельности работают. Тест дописан после ревью: бриф задачи давал
-/// проверки только на создание и удаление, а обновление осталось без неё.
-@Test("правка заметки обновляет и поисковый индекс")
+/// Without this, search would keep finding the note by its old text and
+/// fail to find it by the new one — silently, because both the write path
+/// and the search path work fine on their own. Test added after review:
+/// the task brief only called for create/delete coverage, leaving updates
+/// untested.
+@Test("editing a note refreshes the search index too")
 func updateRefreshesSearchIndex() throws {
     let database = try NotchDatabase(location: .temporary())
     try database.migrate()
     let repository = NotesRepository(database: database)
-    try repository.add("первоначальныйтекст", at: t0)
+    try repository.add("originaltext", at: t0)
     let note = try #require(try repository.all().first)
 
-    try repository.update(id: try #require(note.id), body: "исправленныйтекст", at: t0.addingTimeInterval(60))
+    try repository.update(id: try #require(note.id), body: "correctedtext", at: t0.addingTimeInterval(60))
 
     let indexed = try database.queue.read { db in
         try String.fetchOne(
@@ -118,5 +119,5 @@ func updateRefreshesSearchIndex() throws {
             arguments: [note.id]
         )
     }
-    #expect(indexed == "исправленныйтекст")
+    #expect(indexed == "correctedtext")
 }

@@ -1,12 +1,12 @@
-# Сторонние лицензии
+# Third-Party Licenses
 
-Notchka распространяется под лицензией MIT (см. [LICENSE](LICENSE)) и включает
-в себя следующие сторонние компоненты.
+Notchka is distributed under the MIT license (see [LICENSE](LICENSE)) and
+includes the following third-party components.
 
 ## GRDB.swift
 
-- Источник: https://github.com/groue/GRDB.swift
-- Лицензия: MIT
+- Source: https://github.com/groue/GRDB.swift
+- License: MIT
 
 ```
 Copyright (C) 2015-2025 Gwendal Roué
@@ -20,10 +20,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## mediaremote-adapter
 
-- Источник: https://github.com/ungive/mediaremote-adapter
-- Лицензия: BSD 3-Clause
-- Используется как вендоред-зависимость в `vendor/mediaremote-adapter/` для чтения
-  состояния воспроизведения через приватный `MediaRemote.framework`.
+- Source: https://github.com/ungive/mediaremote-adapter
+- License: BSD 3-Clause
+- Used as a vendored dependency in `vendor/mediaremote-adapter/` to read
+  playback state via the private `MediaRemote.framework`.
 
 ```
 BSD 3-Clause License

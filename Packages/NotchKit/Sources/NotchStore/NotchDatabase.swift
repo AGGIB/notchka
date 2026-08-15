@@ -1,11 +1,11 @@
 import Foundation
 import GRDB
 
-/// Соединение с базой и её схема.
+/// Connection to the database and its schema.
 ///
-/// Миграции нумерованы и неизменны после выпуска: план 4 добавит свои
-/// следующим шагом, а не правкой этого. Иначе база пользователя, созданная
-/// сегодня, разойдётся со схемой, которую ожидает код завтра.
+/// Migrations are numbered and immutable after release: plan 4 will add its
+/// own as a next step, not by editing this one. Otherwise a user's database
+/// created today would diverge from the schema tomorrow's code expects.
 public final class NotchDatabase: Sendable {
     public let queue: DatabaseQueue
 
@@ -21,8 +21,8 @@ public final class NotchDatabase: Sendable {
             try db.create(table: "clipboard_items") { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("kind", .text).notNull()
-                // Хеш содержимого уникален: повторное копирование того же
-                // текста поднимает существующую запись, а не плодит копии.
+                // Content hash is unique: copying the same text again
+                // bumps the existing record instead of creating duplicates.
                 t.column("content_hash", .text).notNull().unique()
                 t.column("text_body", .text)
                 t.column("blob_path", .text)
@@ -33,19 +33,20 @@ public final class NotchDatabase: Sendable {
                 t.column("last_used_at", .datetime).notNull()
                 t.column("is_pinned", .boolean).notNull().defaults(to: false)
             }
-            // Лента всегда сортируется по последнему использованию —
-            // без индекса это полный скан на каждое открытие панели.
+            // The feed is always sorted by last used time —
+            // without an index that's a full scan on every panel open.
             try db.create(index: "idx_clipboard_last_used", on: "clipboard_items", columns: ["last_used_at"])
         }
 
         migrator.registerMigration("v2-search") { db in
-            // Обычная таблица FTS5, а не contentless: индекс хранит копию
-            // текста. Это сознательный размен. Contentless (content='')
-            // сэкономил бы место, но удалять из него можно только особой
-            // командой по rowid, а строки индекса ведут на владельца парой
-            // (owner_kind, owner_id) — по ней и удаляем в Task 4, обычным
-            // DELETE ... WHERE. Стоимость размена невелика: в индекс
-            // попадает только текст, картинки и файлы туда не идут.
+            // A regular FTS5 table, not contentless: the index stores a copy
+            // of the text. This is a deliberate tradeoff. Contentless
+            // (content='') would save space, but deleting from it requires
+            // a special rowid-based command, while index rows point back to
+            // their owner via the (owner_kind, owner_id) pair — that's what
+            // Task 4 deletes by, with an ordinary DELETE ... WHERE. The cost
+            // of the tradeoff is small: only text enters the index, images
+            // and files don't go there.
             try db.create(virtualTable: "search_index", using: FTS5()) { t in
                 t.column("owner_kind").notIndexed()
                 t.column("owner_id").notIndexed()
@@ -68,8 +69,8 @@ public final class NotchDatabase: Sendable {
                 t.column("value", .text).notNull()
                 t.column("icon", .text)
                 t.column("color_hex", .text)
-                // Порядок задаёт пользователь перетаскиванием; дубли
-                // допустимы и разрешаются стабильной сортировкой по id.
+                // Order is set by the user via drag-and-drop; duplicates
+                // are allowed and resolved by a stable sort on id.
                 t.column("sort_order", .integer).notNull()
                 t.column("is_sensitive", .boolean).notNull().defaults(to: false)
                 t.column("created_at", .datetime).notNull()

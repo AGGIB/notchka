@@ -1,20 +1,20 @@
 import CoreGraphics
 
-/// Снимок измерений экрана, достаточный для вычисления чёлки.
-/// Отделён от NSScreen намеренно: геометрия должна считаться на выдуманных
-/// конфигурациях, которых нет под рукой.
+/// A snapshot of screen measurements sufficient for computing the notch.
+/// Deliberately decoupled from NSScreen: geometry must be computable for
+/// synthetic configurations that aren't physically available.
 public struct ScreenMetrics: Sendable, Equatable {
     public let frame: CGRect
-    /// Высота выреза — нулевое значение означает экран без чёлки.
-    /// В macOS это получается из NSScreen.safeAreaInsets.top (крайний слева).
+    /// Notch height — zero means a screen with no notch.
+    /// On macOS this comes from NSScreen.safeAreaInsets.top (leftmost screen).
     public let safeAreaTopInset: CGFloat
-    /// Ширина полосы меню-бара слева от выреза.
-    /// macOS не предоставляет прямого API ширины выреза, поэтому мы вычисляем
-    /// ширину вычитанием боковых областей из ширины экрана.
+    /// Width of the menu bar strip to the left of the notch.
+    /// macOS provides no direct API for the notch width, so we compute it
+    /// by subtracting the side areas from the screen width.
     public let auxiliaryTopLeftWidth: CGFloat
-    /// Ширина полосы меню-бара справа от выреза.
-    /// Вместе с auxiliaryTopLeftWidth позволяет вычислить положение и ширину выреза:
-    /// notchX = auxiliaryTopLeftWidth, notchWidth = frame.width - left - right.
+    /// Width of the menu bar strip to the right of the notch.
+    /// Together with auxiliaryTopLeftWidth this lets us derive the notch's
+    /// position and width: notchX = auxiliaryTopLeftWidth, notchWidth = frame.width - left - right.
     public let auxiliaryTopRightWidth: CGFloat
 
     public init(

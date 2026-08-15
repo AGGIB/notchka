@@ -11,14 +11,14 @@ private func makeRepository() throws -> ClipboardRepository {
 
 private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
-@Test("умолчания совпадают со спекой")
+@Test("defaults match the spec")
 func defaultsMatchSpec() {
     #expect(RetentionPolicy.default.maxItems == 500)
     #expect(RetentionPolicy.default.maxAge == 30 * 24 * 3600)
     #expect(RetentionPolicy.default.maxBlobBytes == 2 * 1024 * 1024 * 1024)
 }
 
-@Test("лишние по количеству удаляются, начиная с самых старых")
+@Test("excess items are dropped, oldest first")
 func excessItemsAreDropped() throws {
     let repository = try makeRepository()
     for index in 0..<10 {
@@ -32,27 +32,27 @@ func excessItemsAreDropped() throws {
     #expect(try repository.recent(limit: 100).map(\.textBody) == ["9", "8", "7", "6"])
 }
 
-@Test("устаревшие по времени удаляются")
+@Test("stale items are dropped")
 func staleItemsAreDropped() throws {
     let repository = try makeRepository()
-    try repository.saveText("древнее", source: nil, at: t0)
-    try repository.saveText("свежее", source: nil, at: t0.addingTimeInterval(86_400))
+    try repository.saveText("ancient", source: nil, at: t0)
+    try repository.saveText("fresh", source: nil, at: t0.addingTimeInterval(86_400))
     let removed = try repository.prune(
         policy: RetentionPolicy(maxItems: .max, maxAge: 3600, maxBlobBytes: .max),
         now: t0.addingTimeInterval(86_400 + 60)
     )
     #expect(removed == 1)
-    #expect(try repository.recent(limit: 10).map(\.textBody) == ["свежее"])
+    #expect(try repository.recent(limit: 10).map(\.textBody) == ["fresh"])
 }
 
-@Test("закреплённое не вытесняется ни по количеству, ни по возрасту")
+@Test("pinned item isn't evicted by count or by age")
 func pinnedSurvivesEverything() throws {
     let repository = try makeRepository()
-    try repository.saveText("закреплённое", source: nil, at: t0)
+    try repository.saveText("pinned", source: nil, at: t0)
     let pinned = try #require(try repository.recent(limit: 1).first)
     try repository.setPinned(id: pinned.id!, true)
     for index in 0..<20 {
-        try repository.saveText("шум \(index)", source: nil, at: t0.addingTimeInterval(Double(index + 1)))
+        try repository.saveText("noise \(index)", source: nil, at: t0.addingTimeInterval(Double(index + 1)))
     }
 
     _ = try repository.prune(
@@ -60,18 +60,18 @@ func pinnedSurvivesEverything() throws {
         now: t0.addingTimeInterval(10_000)
     )
     let survivors = try repository.recent(limit: 100).map(\.textBody)
-    #expect(survivors.contains("закреплённое"))
-    // Без этой строки тест проходит и при полностью нерабочем вытеснении:
-    // закреплённое, разумеется, останется, если не удалено вообще ничего.
-    // Проверяется не «эта запись цела», а «она цела при работающей чистке».
-    #expect(survivors.contains("шум 0") == false)
+    #expect(survivors.contains("pinned"))
+    // Without this line the test would also pass with eviction completely broken:
+    // the pinned item obviously survives if nothing gets deleted at all.
+    // This checks not "this entry survived" but "it survived while pruning actually worked".
+    #expect(survivors.contains("noise 0") == false)
 }
 
-/// Закреплённое исключено из бюджета объёма целиком — не только защищено от
-/// удаления, но и не считается занимающим место. Решение сознательное:
-/// закрепление это явное «храни», а бюджет ограничивает то, что копится
-/// само. Тест закрепляет решение, чтобы оно не отменилось по недосмотру.
-@Test("блобы закреплённых записей не входят в бюджет объёма")
+/// Pinned items are excluded from the size budget entirely — not only protected
+/// from deletion, but also not counted as taking up space. This is deliberate:
+/// pinning is an explicit "keep this", while the budget limits what accumulates
+/// on its own. The test locks in this decision so it doesn't get reverted by accident.
+@Test("blobs of pinned entries are excluded from the size budget")
 func pinnedBlobsAreOutsideTheBudget() throws {
     let repository = try makeRepository()
     try repository.saveImage(Data(repeating: 1, count: 4096), source: nil, at: t0)
@@ -86,16 +86,16 @@ func pinnedBlobsAreOutsideTheBudget() throws {
     #expect(try repository.blobBytes() == 4096)
 }
 
-/// Вытеснение выбирает кандидатов одним запросом, а удаляет их по одному
-/// отдельными транзакциями — иначе GRDB упал бы на вложенной транзакции.
-/// Между выбором и удалением конкретной записи её успевают закрепить, и
-/// проверка внутри транзакции удаления — единственное, что стоит между
-/// такой записью и её потерей. Саму гонку в тесте не воспроизвести,
-/// поэтому проверяется защита напрямую.
-@Test("защищённое удаление щадит закреплённое, прямое — нет")
+/// Eviction selects candidates with a single query, then deletes them one by
+/// one in separate transactions — otherwise GRDB would fail on a nested transaction.
+/// Between selection and deletion of a given entry it can get pinned in time, and
+/// the check inside the deletion transaction is the only thing standing between
+/// such an entry and its loss. The race itself can't be reproduced in a test,
+/// so the guard is verified directly instead.
+@Test("guarded delete spares pinned items, direct delete does not")
 func guardedDeleteSparesPinnedButDirectDoesNot() throws {
     let repository = try makeRepository()
-    try repository.saveText("закреплено позже", source: nil, at: t0)
+    try repository.saveText("pinned later", source: nil, at: t0)
     let item = try #require(try repository.recent(limit: 1).first)
     let id = try #require(item.id)
     try repository.setPinned(id: id, true)
@@ -103,13 +103,13 @@ func guardedDeleteSparesPinnedButDirectDoesNot() throws {
     _ = try repository.performDelete(id: id, sparingPinned: true)
     #expect(try repository.recent(limit: 10).count == 1)
 
-    // Прямое распоряжение пользователя закрепление не останавливает:
-    // закрепил — не значит «удалить нельзя», значит «само не удалится».
+    // A direct user command isn't stopped by pinning:
+    // pinned doesn't mean "cannot be deleted", it means "won't delete itself".
     try repository.delete(id: id)
     #expect(try repository.recent(limit: 10).isEmpty)
 }
 
-@Test("превышение объёма блобов вытесняет самые старые с блобами")
+@Test("exceeding the blob size budget evicts the oldest items with blobs")
 func blobBudgetIsEnforced() throws {
     let repository = try makeRepository()
     for index in 0..<5 {
@@ -125,7 +125,7 @@ func blobBudgetIsEnforced() throws {
     #expect(try repository.blobBytes() <= 2048)
 }
 
-@Test("чистка на пустой базе безопасна")
+@Test("pruning an empty database is safe")
 func pruningEmptyIsSafe() throws {
     let repository = try makeRepository()
     #expect(try repository.prune(policy: .default, now: t0) == 0)

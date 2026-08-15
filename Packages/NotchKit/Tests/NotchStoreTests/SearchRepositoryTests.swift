@@ -8,70 +8,70 @@ private func seeded() throws -> (NotchDatabase, SearchRepository) {
     try database.queue.write { db in
         try db.execute(
             sql: "INSERT INTO search_index (owner_kind, owner_id, title, body) VALUES (?, ?, ?, ?)",
-            arguments: ["clipboard", 1, "Safari", "ссылка на документацию GRDB"]
+            arguments: ["clipboard", 1, "Safari", "link to GRDB documentation"]
         )
         try db.execute(
             sql: "INSERT INTO search_index (owner_kind, owner_id, title, body) VALUES (?, ?, ?, ?)",
-            arguments: ["note", 2, "", "созвон по документации в 15:00"]
+            arguments: ["note", 2, "", "call about documenting the schema at 3pm"]
         )
         try db.execute(
             sql: "INSERT INTO search_index (owner_kind, owner_id, title, body) VALUES (?, ?, ?, ?)",
-            arguments: ["snippet", 3, "Почта", "developer@mobilefirst.kz"]
+            arguments: ["snippet", 3, "Email", "developer@mobilefirst.kz"]
         )
     }
     return (database, SearchRepository(database: database))
 }
 
-// Запрос — "документаци", без последней буквы, а не полное слово из текста
-// заметки ("документации"). У заметки и записи буфера общий корень, но
-// разные падежи ("документации" / "документацию") — без стемминга FTS5 они
-// не совпадают как целые слова, а расходятся ровно в последней букве.
-// Полное слово нашло бы только заметку; общий префикс находит оба — и это
-// не обход, а то же самое поведение, что ловит пользователя, печатающего
-// слово не до конца (см. prefixSearchWorks ниже).
-@Test("находит по всем трём сущностям одним запросом")
+// Query is "document" — a shared prefix of the clipboard entry's
+// "documentation" and the note's "documenting", not the full word from
+// either. The two entries share a root but diverge in suffix — without
+// FTS5 stemming they don't match as whole words. The full word would only
+// find one of them; the shared prefix finds both — and this isn't a
+// workaround, it's the same behavior that catches a user who doesn't
+// finish typing a word (see prefixSearchWorks below).
+@Test("finds across all three entity kinds with one query")
 func searchesAcrossKinds() throws {
     let (_, repository) = try seeded()
-    let results = try repository.search("документаци", limit: 10)
+    let results = try repository.search("document", limit: 10)
     #expect(Set(results.map(\.kind)) == [.clipboard, .note])
 }
 
-@Test("находит пин по метке")
+@Test("finds a pinned snippet by label")
 func findsSnippetByLabel() throws {
     let (_, repository) = try seeded()
-    #expect(try repository.search("Почта", limit: 10).map(\.kind) == [.snippet])
+    #expect(try repository.search("Email", limit: 10).map(\.kind) == [.snippet])
 }
 
-@Test("пустой запрос не возвращает всё подряд")
+@Test("empty query does not return everything")
 func emptyQueryReturnsNothing() throws {
     let (_, repository) = try seeded()
     #expect(try repository.search("   ", limit: 10).isEmpty)
 }
 
-@Test("запрос со спецсимволами FTS не роняет поиск")
+@Test("query with FTS special characters doesn't crash search")
 func ftsSyntaxIsEscaped() throws {
     let (_, repository) = try seeded()
-    // Кавычки и звёздочки — синтаксис FTS5; необработанные, они дают
-    // syntax error и роняют весь поиск на обычном пользовательском вводе.
-    #expect(throws: Never.self) { _ = try repository.search("\"незакрытая", limit: 10) }
+    // Quotes and asterisks are FTS5 syntax; left unescaped, they cause a
+    // syntax error and break the entire search on ordinary user input.
+    #expect(throws: Never.self) { _ = try repository.search("\"unclosed", limit: 10) }
     #expect(throws: Never.self) { _ = try repository.search("* AND *", limit: 10) }
 }
 
-@Test("поиск по префиксу работает — пользователь не дописывает слово целиком")
+@Test("prefix search works — user doesn't finish typing the whole word")
 func prefixSearchWorks() throws {
     let (_, repository) = try seeded()
-    #expect(try repository.search("докум", limit: 10).isEmpty == false)
+    #expect(try repository.search("docum", limit: 10).isEmpty == false)
 }
 
-@Test("лимит соблюдается")
+@Test("limit is honoured")
 func limitIsHonoured() throws {
     let (_, repository) = try seeded()
-    #expect(try repository.search("документаци", limit: 1).count == 1)
+    #expect(try repository.search("document", limit: 1).count == 1)
 }
 
-@Test("результат несёт идентификатор владельца для перехода к элементу")
+@Test("result carries the owner ID to navigate to the item")
 func resultCarriesOwnerID() throws {
     let (_, repository) = try seeded()
-    let result = try #require(try repository.search("Почта", limit: 1).first)
+    let result = try #require(try repository.search("Email", limit: 1).first)
     #expect(result.ownerID == 3)
 }

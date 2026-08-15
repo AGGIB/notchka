@@ -1,25 +1,26 @@
 import Foundation
 import GRDB
 
-/// Какому репозиторию принадлежит найденная запись — по этому полю панель
-/// решает, куда вести пользователя при выборе результата.
+/// Which repository a found record belongs to — the panel uses this field
+/// to decide where to take the user when a result is selected.
 ///
-/// Строковые значения совпадают буквально с `owner_kind` в `search_index`
-/// (см. `ClipboardRepository`, `NotesRepository`, `SnippetsRepository`) —
-/// имена case здесь написаны теми же словами в нижнем регистре, поэтому
-/// синтезированный Swift raw value уже равен нужной строке без явного
-/// присвоения.
+/// The string values match `owner_kind` in `search_index` literally
+/// (see `ClipboardRepository`, `NotesRepository`, `SnippetsRepository`) —
+/// the case names here are written with the same words in lowercase, so
+/// the synthesized Swift raw value already equals the needed string without
+/// an explicit assignment.
 public enum SearchKind: String, Sendable {
     case clipboard
     case note
     case snippet
 }
 
-/// Одна строка сквозного поиска.
+/// A single row of cross-source search.
 ///
-/// `snippet` здесь — фрагмент текста результата (тело индексной записи),
-/// а не пин: совпадение имени с кейсом `SearchKind.snippet` случайно, оба
-/// названы по смыслу интерфейса задачи.
+/// `snippet` here is a fragment of the result's text (the body of the index
+/// record), not a pin: the name coinciding with the `SearchKind.snippet`
+/// case is accidental — both are named for what they mean in the task's
+/// interface.
 public struct SearchResult: Sendable, Equatable {
     public let kind: SearchKind
     public let ownerID: Int64
@@ -27,13 +28,13 @@ public struct SearchResult: Sendable, Equatable {
     public let snippet: String
 }
 
-/// Сквозной поиск по общему индексу `search_index`: история буфера,
-/// заметки и закреплённые сниппеты одним запросом.
+/// Cross-source search over the shared `search_index`: clipboard history,
+/// notes, and pinned snippets in a single query.
 ///
-/// Значение чувствительного пина в индекс не попадает — это гарантирует
-/// `SnippetsRepository` при записи. Поиск читает только `search_index` и
-/// нигде не обращается к `snippets.value` напрямую, поэтому у него физически
-/// нет способа вернуть скрытое значение в обход этой гарантии.
+/// A sensitive pin's value never makes it into the index — `SnippetsRepository`
+/// guarantees that on write. Search only reads `search_index` and never
+/// touches `snippets.value` directly, so it has no physical way to leak the
+/// hidden value around that guarantee.
 public struct SearchRepository: Sendable {
     private let database: NotchDatabase
 
@@ -41,14 +42,14 @@ public struct SearchRepository: Sendable {
         self.database = database
     }
 
-    /// Ищет по всем трём источникам одним запросом к общему индексу.
+    /// Searches all three sources with a single query against the shared index.
     ///
-    /// Пустой после отсечения пробелов ввод, а также ввод, из которого
-    /// токенизатор FTS5 не извлекает ни одного токена (например, один
-    /// голый `*`), даёт `nil` от `sanitize` и здесь превращается в пустой
-    /// результат без обращения к базе — так же, как обычный пустой ввод.
-    /// Порожний запрос не должен возвращать всё подряд, а `MATCH` с пустой
-    /// строкой не осмысленный запрос, чтобы вообще идти в базу.
+    /// Input that's empty after trimming whitespace, as well as input from which
+    /// the FTS5 tokenizer extracts no tokens at all (e.g. a bare `*`), yields
+    /// `nil` from `sanitize` and turns into an empty result here without hitting
+    /// the database — same as a plain empty input. An empty query shouldn't
+    /// return everything, and `MATCH` with an empty string isn't a meaningful
+    /// enough query to bother hitting the database for.
     public func search(_ query: String, limit: Int) throws -> [SearchResult] {
         guard let sanitized = Self.sanitize(query) else { return [] }
 
@@ -76,29 +77,29 @@ public struct SearchRepository: Sendable {
         }
     }
 
-    /// Превращает свободный ввод в безопасный запрос FTS5.
+    /// Turns free-form input into a safe FTS5 query.
     ///
-    /// Без этого обычный ввод с кавычкой или звёздочкой роняет поиск
-    /// синтаксической ошибкой — пользователь не обязан знать грамматику FTS.
-    /// Каждое слово оборачивается в свои кавычки (с удвоением внутренних) и
-    /// склеивается пробелом: несколько одно-словных фраз подряд FTS5 сам
-    /// соединяет через AND, а кавычки заодно не дают словам вроде AND или OR
-    /// быть понятыми как операторы.
+    /// Without this, plain input containing a quote or asterisk crashes search
+    /// with a syntax error — the user isn't obligated to know FTS grammar.
+    /// Each word is wrapped in its own quotes (doubling any inner ones) and
+    /// joined with a space: FTS5 itself ANDs together several single-word
+    /// phrases in a row, and the quotes also keep words like AND or OR from
+    /// being parsed as operators.
     static func sanitize(_ query: String) -> String? {
         let words = query
             .split(whereSeparator: { $0.isWhitespace })
-            // Слово без единой буквы или цифры (например, голая "*") не
-            // даёт токенизатору FTS5 ни одного токена. Кавычки вокруг него
-            // спасают от статуса оператора (AND/OR/NOT), но не от пустой
-            // фразы внутри себя — а это тот же риск синтаксической ошибки,
-            // которого экранирование и должно избегать. Поэтому такие слова
-            // отбрасываются до кавычек, а не после.
+            // A word with no letter or digit at all (e.g. a bare "*") gives the
+            // FTS5 tokenizer no tokens. Quotes around it save it from being read
+            // as an operator (AND/OR/NOT), but not from being an empty phrase
+            // inside itself — which is the same syntax-error risk that escaping
+            // is supposed to avoid. So such words are dropped before quoting,
+            // not after.
             .filter { $0.contains(where: { $0.isLetter || $0.isNumber }) }
             .map { $0.replacingOccurrences(of: "\"", with: "\"\"") }
             .map { "\"\($0)\"" }
         guard !words.isEmpty else { return nil }
-        // Префиксный поиск только для последнего слова: пользователь
-        // дописывает его прямо сейчас, остальные уже введены целиком.
+        // Prefix search only for the last word: the user is typing it
+        // right now, the rest have already been entered in full.
         return words.dropLast().joined(separator: " ") + (words.count > 1 ? " " : "") + words.last! + "*"
     }
 }

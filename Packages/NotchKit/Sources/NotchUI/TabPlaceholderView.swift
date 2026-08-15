@@ -1,23 +1,23 @@
 import SwiftUI
 import NotchCore
 
-/// Заглушка вкладок, которые ещё не подключены к данным.
+/// Placeholder for tabs that aren't wired to data yet.
 ///
-/// Общая для буфера, заметок и пинов — сознательно не имитирует форму
-/// будущего содержимого (у буфера это будет горизонтальная лента карточек,
-/// у остальных — своя раскладка). Она просто занимает всю область
-/// содержимого справа от колонки вкладок той же формы, что займёт настоящая
-/// вкладка, и не больше: следующая задача заменит вызов этой вьюхи для
-/// `.clipboard` целиком, а не будет подстраиваться под неё.
+/// Shared by the clipboard, notes, and pins tabs — deliberately doesn't mimic
+/// the shape of future content (for the clipboard that'll be a horizontal
+/// card strip, the others have their own layout). It just fills the entire
+/// content area to the right of the tab column, the same shape the real tab
+/// will occupy, and no more: the next task will replace the call to this
+/// view for `.clipboard` entirely, rather than adapting it to fit.
 public struct TabPlaceholderView: View {
     private let tab: NotchTab
     private let message: String
 
-    /// `message` подменяется, когда вкладка пуста не потому, что её ещё не
-    /// написали. У буфера есть такой случай: хранилище не открылось, и
-    /// показывать «скоро появится» о готовой функции значит врать
-    /// пользователю про причину.
-    public init(tab: NotchTab, message: String = "Скоро появится") {
+    /// `message` is overridden when a tab is empty for a reason other than
+    /// not being implemented yet. The clipboard has such a case: the store
+    /// failed to open, and showing "coming soon" for an already-built
+    /// feature would lie to the user about the cause.
+    public init(tab: NotchTab, message: String = "Coming soon") {
         self.tab = tab
         self.message = message
     }

@@ -11,29 +11,29 @@ private func makeRepository() throws -> SnippetsRepository {
     return SnippetsRepository(database: database)
 }
 
-@Test("пин сохраняется со всеми полями")
+@Test("pin persists with all fields")
 func snippetRoundTrips() throws {
     let repository = try makeRepository()
-    try repository.add(label: "Почта", value: "developer@mobilefirst.kz",
+    try repository.add(label: "Mail", value: "developer@mobilefirst.kz",
                        icon: "envelope", colorHex: "#FF2D95", isSensitive: false, at: t0)
     let pin = try #require(try repository.all().first)
-    #expect(pin.label == "Почта")
+    #expect(pin.label == "Mail")
     #expect(pin.value == "developer@mobilefirst.kz")
     #expect(pin.icon == "envelope")
     #expect(pin.isSensitive == false)
 }
 
-@Test("пины отдаются в заданном порядке")
+@Test("pins are returned in the given order")
 func orderIsPreserved() throws {
     let repository = try makeRepository()
-    try repository.add(label: "третий", value: "3", icon: nil, colorHex: nil, isSensitive: false, at: t0)
-    try repository.add(label: "первый", value: "1", icon: nil, colorHex: nil, isSensitive: false, at: t0)
+    try repository.add(label: "third", value: "3", icon: nil, colorHex: nil, isSensitive: false, at: t0)
+    try repository.add(label: "first", value: "1", icon: nil, colorHex: nil, isSensitive: false, at: t0)
     let pins = try repository.all()
     try repository.move(id: pins[1].id!, to: 0)
-    #expect(try repository.all().map(\.label) == ["первый", "третий"])
+    #expect(try repository.all().map(\.label) == ["first", "third"])
 }
 
-@Test("перемещение в конец работает")
+@Test("moving to the end works")
 func moveToEnd() throws {
     let repository = try makeRepository()
     for label in ["a", "b", "c"] {
@@ -44,59 +44,60 @@ func moveToEnd() throws {
     #expect(try repository.all().map(\.label) == ["b", "c", "a"])
 }
 
-@Test("чувствительное значение маскируется точками")
+@Test("sensitive value is masked with dots")
 func sensitiveValueIsMasked() {
     #expect(Snippet.masked("123456789012") == "••• ••• •••")
 }
 
-@Test("маскировка не зависит от длины — по ней нельзя угадать значение")
+@Test("masking does not depend on length — the value can't be guessed from it")
 func maskDoesNotLeakLength() {
     #expect(Snippet.masked("12") == Snippet.masked("1234567890123456"))
 }
 
-@Test("пустая метка не сохраняется")
+@Test("empty label is not saved")
 func emptyLabelIsRejected() throws {
     let repository = try makeRepository()
-    try repository.add(label: "  ", value: "значение", icon: nil, colorHex: nil, isSensitive: false, at: t0)
+    try repository.add(label: "  ", value: "value", icon: nil, colorHex: nil, isSensitive: false, at: t0)
     #expect(try repository.all().isEmpty)
 }
 
-@Test("метка попадает в индекс, а чувствительное значение — нет")
+@Test("label is indexed, but sensitive value is not")
 func sensitiveValueIsNotIndexed() throws {
     let database = try NotchDatabase(location: .temporary())
     try database.migrate()
     let repository = SnippetsRepository(database: database)
-    try repository.add(label: "ИИН", value: "секретноезначение",
+    try repository.add(label: "National ID", value: "secretvalue",
                        icon: nil, colorHex: nil, isSensitive: true, at: t0)
 
     let leaked = try database.queue.read { db in
         try Int.fetchOne(
             db,
-            sql: "SELECT COUNT(*) FROM search_index WHERE body LIKE '%секретноезначение%'"
+            sql: "SELECT COUNT(*) FROM search_index WHERE body LIKE '%secretvalue%'"
         ) ?? 0
     }
     #expect(leaked == 0)
 }
 
-/// Правка обязана доезжать до индекса, а не только до самой записи пина.
+/// An edit must reach the index, not just the pin's own record.
 ///
-/// Без этого поиск продолжал бы находить пин по старой метке и не находил
-/// бы по новой — молча, потому что запись и поиск по отдельности работают.
-/// Бриф задачи дал проверки индекса только на создание (через отсутствие
-/// утечки чувствительного значения) — путь обновления остался без своей
-/// проверки, как в прошлой задаче с заметками, где это вскрылось уже на
-/// ревью. Тест добавлен сразу, а не после повторной находки.
-@Test("правка пина обновляет метку в поисковом индексе")
+/// Without this, search would keep finding the pin by its old label and
+/// would fail to find it by the new one — silently, because writing and
+/// searching each work fine on their own. The task brief only covered
+/// index checks for creation (via the absence of sensitive-value leakage)
+/// — the update path was left without its own check, the same way it
+/// slipped through on the earlier notes task, where it surfaced only at
+/// review. This test was added up front, not after a repeat finding.
+@Test("editing a pin updates the label in the search index")
 func snippetUpdateRefreshesSearchIndex() throws {
     let database = try NotchDatabase(location: .temporary())
     try database.migrate()
     let repository = SnippetsRepository(database: database)
-    try repository.add(label: "старая метка", value: "значение",
+    try repository.add(label: "old label", value: "value",
                        icon: nil, colorHex: nil, isSensitive: false, at: t0)
     let pin = try #require(try repository.all().first)
 
     var updated = pin
-    updated.label = "новая метка"
+    updated.label = "new label"
     try repository.update(updated, at: t0.addingTimeInterval(60))
 
     let indexed = try database.queue.read { db in
@@ -106,22 +107,22 @@ func snippetUpdateRefreshesSearchIndex() throws {
             arguments: [pin.id]
         )
     }
-    // Метка живёт в title, значение — в body: так же, как у истории буфера,
-    // где title это имя приложения-источника.
-    #expect(indexed == "новая метка")
+    // The label lives in title, the value in body: same as clipboard
+    // history, where title holds the name of the source app.
+    #expect(indexed == "new label")
 }
 
-/// Удаление обязано убирать и саму запись, и строку индекса — иначе поиск
-/// находил бы уже удалённый пин. Заодно проверяет то, что имя брифового
-/// теста `sensitiveValueIsNotIndexed` заявляет, но не проверяет само тело:
-/// что метка действительно попадает в индекс при создании (а не только
-/// что чувствительное значение туда не попадает).
-@Test("удаление убирает пин и его строку индекса")
+/// Deletion must remove both the record itself and its index row —
+/// otherwise search would keep finding an already-deleted pin. This also
+/// covers what the brief test `sensitiveValueIsNotIndexed`'s name claims
+/// but its body never checks: that the label actually gets indexed on
+/// creation (not just that the sensitive value doesn't).
+@Test("deletion removes the pin and its index row")
 func deleteRemovesSnippetAndIndexRow() throws {
     let database = try NotchDatabase(location: .temporary())
     try database.migrate()
     let repository = SnippetsRepository(database: database)
-    try repository.add(label: "удалить", value: "значение",
+    try repository.add(label: "delete", value: "value",
                        icon: nil, colorHex: nil, isSensitive: false, at: t0)
     let pin = try #require(try repository.all().first)
 
@@ -129,7 +130,7 @@ func deleteRemovesSnippetAndIndexRow() throws {
         try Int.fetchOne(
             db,
             sql: "SELECT COUNT(*) FROM search_index WHERE owner_kind = 'snippet' AND title = ?",
-            arguments: ["удалить"]
+            arguments: ["delete"]
         ) ?? 0
     }
     #expect(indexedBeforeDelete == 1)
@@ -146,41 +147,42 @@ func deleteRemovesSnippetAndIndexRow() throws {
     #expect(indexedAfterDelete == 0)
 }
 
-/// Обратная сторона теста выше: скрывается именно секрет, а не значение
-/// как класс.
+/// The flip side of the test above: what's hidden is specifically the
+/// secret, not values as a whole class.
 ///
-/// Изначально здесь стояла проверка, требовавшая не индексировать значения
-/// вовсе, ни для каких пинов. Правило проще и безопаснее на вид, но платой
-/// за него была бы почти полная непоисковость пинов: почту и телефон
-/// человек ищет по самому номеру не реже, чем по подписи, — то есть защита
-/// оплачивалась бы той самой функцией, ради которой пины и заведены.
-@Test("значение нечувствительного пина индексируется и находится")
+/// This originally checked a rule requiring that values never be indexed
+/// at all, for any pin. The rule looks simpler and safer on its face, but
+/// its cost would be pins becoming almost entirely unsearchable: people
+/// search for a mail or phone pin by the number itself at least as often
+/// as by the label — so the protection would be paid for with the very
+/// feature pins exist for.
+@Test("a non-sensitive pin's value is indexed and found")
 func nonSensitiveValueIsIndexed() throws {
     let database = try NotchDatabase(location: .temporary())
     try database.migrate()
     let repository = SnippetsRepository(database: database)
-    try repository.add(label: "Телефон", value: "открытоезначение",
+    try repository.add(label: "Phone", value: "openvalue",
                        icon: nil, colorHex: nil, isSensitive: false, at: t0)
 
     let indexed = try database.queue.read { db in
         try Int.fetchOne(
             db,
             sql: "SELECT COUNT(*) FROM search_index WHERE body LIKE ?",
-            arguments: ["%открытоезначение%"]
+            arguments: ["%openvalue%"]
         ) ?? 0
     }
     #expect(indexed == 1)
 }
 
-/// Смена признака чувствительности обязана убирать значение из индекса, а
-/// не только менять то, как пин рисуется: иначе пин, помеченный секретным
-/// задним числом, остаётся находимым по своему же значению.
-@Test("пин, ставший чувствительным при правке, уходит из индекса значением")
+/// Toggling the sensitive flag must remove the value from the index, not
+/// just change how the pin is rendered: otherwise a pin marked sensitive
+/// after the fact stays findable by its own value.
+@Test("a pin that becomes sensitive on edit drops its value out of the index")
 func turningSensitiveRemovesValueFromIndex() throws {
     let database = try NotchDatabase(location: .temporary())
     try database.migrate()
     let repository = SnippetsRepository(database: database)
-    try repository.add(label: "ИИН", value: "секретпозже",
+    try repository.add(label: "National ID", value: "secretlater",
                        icon: nil, colorHex: nil, isSensitive: false, at: t0)
     var pin = try #require(try repository.all().first)
 
@@ -191,20 +193,20 @@ func turningSensitiveRemovesValueFromIndex() throws {
         try Int.fetchOne(
             db,
             sql: "SELECT COUNT(*) FROM search_index WHERE body LIKE ?",
-            arguments: ["%секретпозже%"]
+            arguments: ["%secretlater%"]
         ) ?? 0
     }
     #expect(leaked == 0)
 }
 
-/// Пустая после отсечения пробелов метка отклоняется и при правке, тем же
-/// правилом, что и при создании, — иначе пин можно обезличить до пина без
-/// подписи правкой, а не только создать такой напрямую (брифовый тест
-/// `emptyLabelIsRejected` проверяет только add).
-@Test("пустая метка не сохраняется и при правке")
+/// A label that's empty after trimming whitespace is rejected on edit
+/// too, by the same rule as on creation — otherwise a pin could be
+/// stripped down to a labelless pin via an edit, not just created that
+/// way directly (the brief test `emptyLabelIsRejected` only covers add).
+@Test("empty label is not saved on edit either")
 func emptyLabelIsRejectedOnUpdate() throws {
     let repository = try makeRepository()
-    try repository.add(label: "исходная метка", value: "значение",
+    try repository.add(label: "original label", value: "value",
                        icon: nil, colorHex: nil, isSensitive: false, at: t0)
     let pin = try #require(try repository.all().first)
 
@@ -212,5 +214,5 @@ func emptyLabelIsRejectedOnUpdate() throws {
     blanked.label = "   "
     try repository.update(blanked, at: t0.addingTimeInterval(60))
 
-    #expect(try repository.all().map(\.label) == ["исходная метка"])
+    #expect(try repository.all().map(\.label) == ["original label"])
 }

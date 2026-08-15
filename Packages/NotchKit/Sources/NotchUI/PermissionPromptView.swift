@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Что показывать во вкладке буфера обмена: объяснение разрешения или
-/// саму ленту истории.
+/// What to show in the clipboard tab: the permission explanation or
+/// the history ribbon itself.
 ///
-/// Отдельная точка ветвления, а не условие внутри вьюхи — тот же приём и та
-/// же причина, что у KeyBinding.event и ClipboardCard.preview: решение «что
-/// показать» проверяется тестом без окна, а не кликом по живой панели (см.
-/// PermissionPromptViewTests).
+/// A separate branch point, not a condition inside the view — the same
+/// technique and the same reason as KeyBinding.event and ClipboardCard.preview:
+/// the "what to show" decision is verified by a windowless test, not by
+/// clicking through the live panel (see PermissionPromptViewTests).
 public enum ClipboardTabContent: Equatable, Sendable {
     case permissionPrompt
     case ribbon
@@ -16,26 +16,26 @@ public enum ClipboardTabContent: Equatable, Sendable {
     }
 }
 
-/// Онбординг разрешения Accessibility — показывается во вкладке буфера
-/// вместо ленты, пока разрешение не выдано (см. ClipboardTabContent).
-/// Не отдельное окно и не слой поверх панели: панель — это и есть интерфейс
-/// приложения, вкладка просто показывает другой шаг вместо ленты.
+/// Accessibility permission onboarding — shown in the clipboard tab
+/// instead of the ribbon until the permission is granted (see ClipboardTabContent).
+/// Not a separate window and not a layer over the panel: the panel is the
+/// app's interface, the tab just shows a different step instead of the ribbon.
 ///
-/// Сама не вызывает ни AccessibilityPermission.requestIfNeeded(), ни
-/// .openSettings(): NotchUI не импортирует AppKit (Global Constraints
-/// плана), поэтому обе кнопки лишь сообщают о нажатии наружу через
-/// замыкания — настоящий вызов делает app-таргет (см. NotchRootView в
-/// AppDelegate.swift). Из этого следует и то, что системный диалог не может
-/// всплыть сам по себе при построении этой вьюхи — только по прямому
-/// нажатию «Разрешить» пользователем.
+/// Doesn't itself call AccessibilityPermission.requestIfNeeded() or
+/// .openSettings(): NotchUI doesn't import AppKit (Global Constraints
+/// of the plan), so both buttons only report the tap outward via
+/// closures — the actual call is made by the app target (see NotchRootView in
+/// AppDelegate.swift). It follows from this that the system dialog can't
+/// pop up on its own while this view is being built — only from the user's
+/// direct tap on "Allow".
 public struct PermissionPromptView: View {
     private let onRequestPermission: () -> Void
     private let onOpenSettings: () -> Void
 
-    /// Ширина текста объяснения. Область содержимого вкладки — около 514×202 pt
-    /// (PanelMetrics.contentSize минус колонка вкладок и промежуток, см.
-    /// NotchPanelView.tabBody), и без ограничения по ширине текст растянулся
-    /// бы на всю неё одной длинной строкой вместо читаемого абзаца.
+    /// Width of the explanation text. The tab's content area is about 514×202 pt
+    /// (PanelMetrics.contentSize minus the tab column and gap, see
+    /// NotchPanelView.tabBody), and without a width constraint the text would
+    /// stretch across all of it as one long line instead of a readable paragraph.
     private static let explanationWidth: CGFloat = 260
 
     public init(
@@ -55,28 +55,28 @@ public struct PermissionPromptView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Иконка, заголовок и текст объединены в один accessibility-элемент:
-    /// это описание экрана целиком, а не три независимых пункта для VoiceOver
-    /// — тот же приём, что у TabPlaceholderView. Кнопки ниже сознательно вне
-    /// этого блока, чтобы остаться независимо доступными с клавиатуры.
+    /// The icon, title, and text are combined into one accessibility element:
+    /// this is a description of the whole screen, not three independent items for
+    /// VoiceOver — the same technique as TabPlaceholderView. The buttons below are
+    /// deliberately outside this block, to stay independently reachable by keyboard.
     private var explanation: some View {
         VStack(spacing: 8) {
             Image(systemName: "hand.raised.fill")
                 .font(.system(size: 26, weight: .light))
                 .foregroundStyle(.white.opacity(0.3))
-            Text("Вставка в приложения")
+            Text("Paste into apps")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
-            // Называет действие (⌘V в активное приложение) и честно говорит,
-            // что будет, если отказать, — без запугивания и без уговоров.
+            // Names the action (⌘V into the active app) and honestly states
+            // what happens if the user declines — no scare tactics, no persuasion.
             //
-            // Про «клик просто копирует» здесь сказать нельзя, хотя запасной
-            // путь в PasteService именно такой: пока разрешения нет, вместо
-            // ленты показан этот экран, и кликать не по чему. Реальное
-            // следствие отказа — что он и останется на месте ленты, и
-            // сказано именно это. Коротко намеренно: у вкладки всего ~202 pt
-            // высоты, тратить их на абзац нечем.
-            Text("Клик по карточке шлёт ⌘V в активное приложение. История буфера пишется и без разрешения — но лента останется закрытой этим экраном.")
+            // Can't say "a click just copies" here, even though that's exactly the
+            // fallback path in PasteService: while there's no permission, this
+            // screen is shown instead of the ribbon, so there's nothing to click.
+            // The actual consequence of declining is that it stays in the ribbon's
+            // place — and that's exactly what's said. Deliberately short: the tab
+            // only has ~202 pt of height, there's no room to spend on a paragraph.
+            Text("Clicking a card sends ⌘V to the active app. Clipboard history is recorded even without the permission — but the ribbon will stay hidden behind this screen.")
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
@@ -84,34 +84,34 @@ public struct PermissionPromptView: View {
                 .frame(maxWidth: Self.explanationWidth)
         }
         .accessibilityElement(children: .combine)
-        // Метка задана явно, как и у TabPlaceholderView: без неё VoiceOver
-        // соберёт фразу сам и вставит в неё автоописание символа
-        // hand.raised.fill, которое к остальному русскому тексту экрана
-        // отношения не имеет.
-        .accessibilityLabel("Вставка в приложения. Нужно разрешение Accessibility, чтобы вставлять выбранное из истории в активное приложение.")
+        // The label is set explicitly, same as TabPlaceholderView: without it
+        // VoiceOver would assemble the phrase itself and insert the auto-description
+        // of the hand.raised.fill symbol, which has nothing to do with the
+        // rest of the screen's text.
+        .accessibilityLabel("Paste into apps. Requires the Accessibility permission to paste the selected history item into the active app.")
     }
 
-    /// Две кнопки, не одна: системный диалог macOS показывается один раз и
-    /// потом молчит, поэтому пользователю, который его закрыл, нужен
-    /// отдельный путь в Настройки. «Разрешить» — основное действие
-    /// (проминентная кнопка справа, ближе к обычному месту кнопки по
-    /// умолчанию в диалогах macOS), «Открыть настройки» — запасной путь.
+    /// Two buttons, not one: the macOS system dialog shows once and then
+    /// stays silent, so a user who dismissed it needs a separate path to
+    /// Settings. "Allow" is the primary action (the prominent button on the
+    /// right, closer to the usual default-button position in macOS dialogs),
+    /// "Open Settings" is the fallback path.
     private var buttons: some View {
         HStack(spacing: 10) {
-            PermissionButton(title: "Открыть настройки", isProminent: false, action: onOpenSettings)
-            PermissionButton(title: "Разрешить", isProminent: true, action: onRequestPermission)
+            PermissionButton(title: "Open Settings", isProminent: false, action: onOpenSettings)
+            PermissionButton(title: "Allow", isProminent: true, action: onRequestPermission)
         }
     }
 }
 
-/// Кнопка экрана разрешения.
+/// Button for the permission screen.
 ///
-/// Проминентная — сплошная белая с чёрным текстом: тот же приём и то же
-/// обоснование, что у PlayPauseButtonStyle в MusicTabView — единственное
-/// намеренное исключение из «белого разной прозрачности» ради однозначно
-/// кликабельной главной кнопки. Второстепенная — плашка низкой
-/// непрозрачности, как неактивный пункт TabRailView. Видимый текст кнопки
-/// сам по себе служит accessibility-меткой, отдельная не нужна.
+/// Prominent — solid white with black text: the same technique and the same
+/// rationale as PlayPauseButtonStyle in MusicTabView — the one deliberate
+/// exception from "white at varying opacity" for the sake of an unambiguously
+/// clickable primary button. Secondary — a low-opacity plate, like an inactive
+/// TabRailView item. The button's visible text itself serves as the
+/// accessibility label, no separate one is needed.
 private struct PermissionButton: View {
     let title: String
     let isProminent: Bool
@@ -140,10 +140,10 @@ private struct PermissionButtonStyle: ButtonStyle {
             .foregroundStyle(isProminent ? .black : .white.opacity(0.85))
             .background(backdrop)
             .clipShape(Capsule())
-            // Нажатие отвечает мгновенно, без .animation(): тот же приём, что
-            // у PlayPauseButtonStyle и TabRailItemStyle — своей анимации
-            // здесь нет намеренно, заводить новую запрещает правило проекта,
-            // а готовой константы подходящего порядка в NotchMotion нет.
+            // The press responds instantly, without .animation(): the same technique
+            // as PlayPauseButtonStyle and TabRailItemStyle — there's deliberately no
+            // animation of its own here; the project rule forbids introducing a new
+            // one, and there's no ready-made constant of a suitable order in NotchMotion.
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
     }
 

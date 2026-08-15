@@ -1,85 +1,91 @@
 import Foundation
 
-/// Источник сведений о текущем воспроизведении.
+/// Source of information about current playback.
 ///
-/// Протокол существует ради риска, названного в спеке главным: MediaRemote
-/// закрыт приватным entitlement, и если perl-обход перестанет работать,
-/// вторая реализация напишется на браузерном расширении, а UI не изменится.
+/// The protocol exists for the risk the spec calls the main one: MediaRemote
+/// is gated behind a private entitlement, and if the perl workaround stops
+/// working, a second implementation can be written as a browser extension
+/// without changing the UI.
 public protocol NowPlayingProvider: Sendable {
-    /// nil в потоке значит «сейчас ничего не играет».
+    /// nil in the stream means "nothing is playing right now".
     ///
-    /// Сколько потребителей одновременно поток обслуживает честно и не
-    /// теряя события — решает реализация; сверяйтесь с её документацией
-    /// (`AdapterProvider` рассчитан ровно на одного).
+    /// How many consumers the stream can serve concurrently, honestly and
+    /// without dropping events, is up to the implementation; check its
+    /// documentation (`AdapterProvider` is designed for exactly one).
     var snapshots: AsyncStream<NowPlayingSnapshot?> { get async }
     func send(_ command: MediaCommand) async throws
 
-    /// Разовая пересинхронизация в обход потока и его накопителя — снимок
-    /// того, что источник знает прямо сейчас.
+    /// A one-off resync that bypasses the stream and its accumulator — a
+    /// snapshot of what the source knows right now.
     ///
-    /// Существует ради дефекта, который по потоку не увидеть в принципе:
-    /// система иногда не присылает событие о возврате к прежнему источнику
-    /// после короткой интерцепции (уведомление со звуком поверх настоящей
-    /// музыки) — поток жив, но навсегда застревает на данных интерцепции,
-    /// потому что событию просто неоткуда взяться. Разбором того, что уже
-    /// пришло по потоку, это не чинится: там ничего нет. `refresh()` —
-    /// единственный способ вызывающей стороны (MusicViewModel) получить
-    /// актуальное состояние в этой ситуации.
+    /// Exists for a defect that is fundamentally invisible through the
+    /// stream: the system sometimes never sends an event about returning to
+    /// the previous source after a brief interception (a notification sound
+    /// playing over real music) — the stream stays alive but gets stuck on
+    /// the interception's data forever, because the event simply never
+    /// arrives. Parsing what has already come through the stream doesn't
+    /// fix this: there's nothing there to parse. `refresh()` is the
+    /// caller's (MusicViewModel) only way to get the current state in this
+    /// situation.
     ///
-    /// Без реализации по умолчанию нарочно: молчаливый no-op, возвращающий
-    /// nil всегда, выглядел бы рабочей резинхронизацией для второй
-    /// реализации протокола (браузерное расширение, см. doc выше), а на
-    /// деле не производил бы эффекта — и разница обнаружилась бы только на
-    /// живой машине, тем же способом, каким нашёлся сам дефект.
+    /// Deliberately has no default implementation: a silent no-op that
+    /// always returns nil would look like a working resync for the second
+    /// protocol implementation (browser extension, see doc above), while
+    /// actually having no effect — and the difference would only surface on
+    /// a live machine, the same way the defect itself was found.
     ///
-    /// nil означает то же, что и nil в `snapshots`, — «сейчас ничего не
-    /// играет». Неудачу самого запроса (адаптер не запустился и т.п.)
-    /// реализация обязана бросить, а не свести к nil: эти два исхода требуют
-    /// от вызывающей стороны противоположного. На «ничего не играет» экран
-    /// надо очистить, на осечку — оставить последний известный трек до
-    /// следующей попытки. Сведённые в одно значение, они дают мигание:
-    /// пересинхронизация идёт по таймеру, и каждая осечка гасила бы панель
-    /// у пользователя, у которого на самом деле всё играет.
+    /// nil means the same thing as nil in `snapshots` — "nothing is
+    /// playing right now". A failure of the request itself (the adapter
+    /// didn't launch, etc.) must be thrown by the implementation, not
+    /// collapsed into nil: these two outcomes require opposite handling
+    /// from the caller. On "nothing is playing" the screen should be
+    /// cleared; on a misfire, the last known track should stay until the
+    /// next attempt. Collapsed into one value, they'd cause flicker: resync
+    /// runs on a timer, and every misfire would blank the panel for a user
+    /// who actually has something playing.
     func refresh() async throws -> NowPlayingSnapshot?
 
-    /// Останавливает пайплайн и гарантированно дожидается завершения —
-    /// вызывающая сторона (см. AppDelegate) полагается на то, что после
-    /// возврата отсюда никакой сторонний процесс уже не работает. Нужен
-    /// отдельно от простого «отменить и забыть»: при завершении приложения
-    /// полагаться на deinit нельзя — AppKit заканчивает процесс через
-    /// exit(), в обход раскрутки стека Swift и деинициализаторов.
+    /// Stops the pipeline and guarantees it waits for completion — the
+    /// caller (see AppDelegate) relies on no external process still running
+    /// after this returns. Needed separately from a simple "cancel and
+    /// forget": relying on deinit at app termination doesn't work — AppKit
+    /// ends the process via exit(), bypassing Swift stack unwinding and
+    /// deinitializers.
     func shutdown() async
 }
 
-/// Склейка потока адаптера в текущее состояние.
+/// Folds the adapter's stream into the current state.
 ///
-/// Отдельно от процесса, потому что здесь вся логика «что делать со строкой»,
-/// и её надо проверять без запуска perl.
+/// Kept separate from the process, because all the "what to do with a
+/// line" logic lives here, and it needs to be testable without running
+/// perl.
 public struct SnapshotAccumulator: Sendable {
     public private(set) var current: NowPlayingSnapshot?
 
     public init() {}
 
-    /// Возвращает состояние после применения строки.
+    /// Returns the state after applying a line.
     ///
-    /// `now` — инжектируемые часы, а не `Date()` внутри метода: этот тип
-    /// проверяется без запуска perl (см. doc выше), а часы, зашитые внутрь,
-    /// такую проверку бы исключили. Единственный потребитель значения —
-    /// `NowPlayingPayload.applied(to:now:)`, где `now` идёт в дело только при
-    /// переходе isPlaying false→true без собственной timestamp у диффа (см.
-    /// её doc-комментарий); для снимков и осечек параметр ни на что не влияет.
+    /// `now` is an injected clock, not `Date()` inside the method: this
+    /// type is tested without running perl (see doc above), and a clock
+    /// baked in would rule that out. The only consumer of the value is
+    /// `NowPlayingPayload.applied(to:now:)`, where `now` matters only on an
+    /// isPlaying false→true transition when the diff has no timestamp of
+    /// its own (see its doc comment); for snapshots and misfires the
+    /// parameter has no effect.
     @discardableResult
     public mutating func apply(_ line: AdapterLine, now: Date) -> NowPlayingSnapshot? {
         switch line {
         case .snapshot(let snapshot):
             current = snapshot
         case .diff(let payload):
-            // Дифф до первого снимка описывает изменение неизвестно чего —
-            // выдумывать по нему трек нельзя.
+            // A diff before the first snapshot describes a change to
+            // something unknown — a track can't be invented from it.
             current = payload.applied(to: current, now: now)
         case .transientFailure, .unrecognized:
-            // Канал жив, конкретная строка бесполезна. Последний известный
-            // трек остаётся на экране: гасить его было бы враньём наоборот.
+            // The channel is alive, this particular line is useless. The
+            // last known track stays on screen: clearing it would be a lie
+            // in the other direction.
             break
         }
         return current

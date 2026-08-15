@@ -1,7 +1,7 @@
 import Testing
 @testable import MediaBridge
 
-@Test("паузы удваиваются от одной секунды")
+@Test("delays double starting from one second")
 func delaysDouble() {
     var policy = RestartPolicy()
     #expect(policy.nextDelay() == 1)
@@ -10,7 +10,7 @@ func delaysDouble() {
     #expect(policy.nextDelay() == 8)
 }
 
-@Test("пауза упирается в потолок и дальше не растёт")
+@Test("delay hits the ceiling and stops growing")
 func delayIsCapped() {
     var policy = RestartPolicy()
     for _ in 0..<10 { _ = policy.nextDelay() }
@@ -18,7 +18,7 @@ func delayIsCapped() {
     #expect(policy.nextDelay() == 30)
 }
 
-@Test("успешное подключение сбрасывает паузу")
+@Test("a successful connection resets the delay")
 func successResetsDelay() {
     var policy = RestartPolicy()
     _ = policy.nextDelay()

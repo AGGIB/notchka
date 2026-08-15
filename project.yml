@@ -44,26 +44,27 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
-        # Ad-hoc здесь — намеренно generic-умолчание для чужой машины: у
-        # клонировавшего репозиторий нет ни моего сертификата, ни моей
-        # команды, и жёстко забитая личная подпись просто не собралась бы.
+        # Ad-hoc here is an intentional generic default for someone else's
+        # machine: whoever clones the repo has neither my certificate nor my
+        # team, and a hardcoded personal signature simply wouldn't build.
         #
-        # Локально, для себя, это не то, чем стоит пользоваться: ad-hoc
-        # меняет отпечаток при каждой пересборке, а macOS привязывает
-        # выданное разрешение Accessibility именно к отпечатку — разрешение
-        # пришлось бы выдавать заново после каждой сборки. Для стабильной
-        # локальной подписи передавай CODE_SIGN_IDENTITY/DEVELOPMENT_TEAM
-        # аргументами `xcodebuild ... CODE_SIGN_IDENTITY=... DEVELOPMENT_TEAM=...`
-        # — они переопределяют это значение поверх сгенерированного проекта,
-        # и личная подпись при этом никогда не попадает в git.
+        # Locally, for yourself, this isn't something you should use: ad-hoc
+        # changes the fingerprint on every rebuild, and macOS ties the
+        # granted Accessibility permission to that exact fingerprint — the
+        # permission would have to be granted again after every build. For a
+        # stable local signature, pass CODE_SIGN_IDENTITY/DEVELOPMENT_TEAM as
+        # arguments to `xcodebuild ... CODE_SIGN_IDENTITY=... DEVELOPMENT_TEAM=...`
+        # — they override this value on top of the generated project, and
+        # your personal signature never ends up in git.
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: ""
         CODE_SIGNING_REQUIRED: YES
         PROVISIONING_PROFILE_SPECIFIER: ""
-        # YES для Release: обязательное условие нотаризации Apple — без
-        # усиленного runtime notarytool отклонит сборку ещё на этапе приёма.
-        # NO для Debug — сборка для локальной отладки под ним не нуждается.
+        # YES for Release: a required condition for Apple notarization —
+        # without the hardened runtime, notarytool will reject the build
+        # right at the intake stage.
+        # NO for Debug — a local debug build doesn't need it.
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_USER_SCRIPT_SANDBOXING: NO
       configs:

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Карточка ленты буфера обмена.
+/// Clipboard history strip card.
 public struct ClipboardCard: Identifiable, Equatable, Sendable {
     public enum Kind: Sendable { case text, image, file }
 
@@ -9,12 +9,13 @@ public struct ClipboardCard: Identifiable, Equatable, Sendable {
     public let preview: String
     public let source: String
     public let isPinned: Bool
-    /// Готовая картинка для карточки-скриншота.
+    /// Ready-made image for a screenshot card.
     ///
-    /// Именно `Image`, а не байты: NotchUI не импортирует AppKit, а без него
-    /// собрать картинку из `Data` в SwiftUI нечем — `Image(data:)` не
-    /// существует. Поэтому картинку строит app-таргет и передаёт готовой,
-    /// ровно как уже сделано с обложкой альбома в MusicTabView.
+    /// `Image`, not raw bytes: NotchUI doesn't import AppKit, and without it
+    /// there's nothing in SwiftUI to build an image from `Data` with —
+    /// `Image(data:)` doesn't exist. So the app target builds the image and
+    /// passes it in ready-made, exactly as already done for album art in
+    /// MusicTabView.
     public let thumbnail: Image?
 
     public init(
@@ -29,11 +30,11 @@ public struct ClipboardCard: Identifiable, Equatable, Sendable {
         self.thumbnail = thumbnail
     }
 
-    /// Превью для карточки.
+    /// Preview text for the card.
     ///
-    /// Переводы строк схлопываются, потому что карточка фиксированной
-    /// высоты: многострочный текст иначе обрежется на первой строке и
-    /// станет неузнаваемым.
+    /// Line breaks are collapsed because the card has a fixed height:
+    /// otherwise multiline text would get cut off at the first line and
+    /// become unrecognizable.
     public static func preview(for text: String, maxLength: Int) -> String {
         let flattened = text
             .split(whereSeparator: \.isNewline)
@@ -45,12 +46,12 @@ public struct ClipboardCard: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Горизонтальная лента истории буфера обмена.
+/// Horizontal strip of clipboard history.
 ///
-/// Лента, а не список — решение владельца на этапе дизайна: раскрытая
-/// панель невысокая (см. PanelMetrics.expandedSize), а лента вдобавок
-/// показывает картинки картинками, а не одной подписанной строкой на
-/// элемент, как было бы в списке.
+/// A strip, not a list — an owner decision made at the design stage: the
+/// expanded panel is short (see PanelMetrics.expandedSize), and a strip
+/// also shows images as images rather than one captioned line per item,
+/// as a list would.
 public struct ClipboardTabView: View {
     private let cards: [ClipboardCard]
     private let selected: ClipboardCard.ID?
@@ -58,10 +59,10 @@ public struct ClipboardTabView: View {
     private let onActivate: (ClipboardCard.ID) -> Void
     private let onCopyOnly: (ClipboardCard.ID) -> Void
 
-    /// Состояние ⌥ — одно на всю ленту, а не по одному на карточку: клавиша
-    /// либо зажата, либо нет, сразу для всех карточек. `onModifierKeysChanged`
-    /// (macOS 15+) даёт этот статус без единого обращения к AppKit/NSEvent —
-    /// NotchUI импортировать AppKit не должен (Global Constraints плана).
+    /// ⌥ state — one for the whole strip, not per card: the key is either
+    /// held or not, for all cards at once. `onModifierKeysChanged`
+    /// (macOS 15+) gives this status without a single call to AppKit/NSEvent —
+    /// NotchUI must not import AppKit (per the plan's Global Constraints).
     @State private var isOptionHeld = false
 
     private static let cardSpacing: CGFloat = 10
@@ -82,10 +83,10 @@ public struct ClipboardTabView: View {
 
     public var body: some View {
         if cards.isEmpty {
-            // Честный пустой экран — тот же принцип, что в MusicTabView для
-            // отсутствующего трека: вкладка уже работает, просто пока
-            // нечего показать, это не «Скоро появится» (TabPlaceholderView).
-            Text("Буфер пуст")
+            // Honest empty state — same principle as MusicTabView for a missing
+            // track: the tab already works, there's just nothing to show yet;
+            // this isn't "Coming soon" (TabPlaceholderView).
+            Text("Clipboard is empty")
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.4))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -94,15 +95,15 @@ public struct ClipboardTabView: View {
                 LazyHStack(alignment: .top, spacing: Self.cardSpacing) {
                     ForEach(cards) { card in
                         ClipboardCardView(card: card, isSelected: card.id == selected, accent: accent) {
-                            // Решение №2 постановки: клик вставляет, ⌥клик
-                            // только копирует. Само решение, каким действием
-                            // ответить на клик, принимает вызывающая сторона
-                            // (ClipboardViewModel) — карточка лишь сообщает id.
+                            // Decision #2 from the spec: a click pastes, ⌥click
+                            // only copies. The decision of which action to take
+                            // in response to a click is made by the caller
+                            // (ClipboardViewModel) — the card just reports the id.
                             if isOptionHeld { onCopyOnly(card.id) } else { onActivate(card.id) }
                         }
                     }
                 }
-                // Хвост ленты не должен обрезаться заподлицо с краем скролла.
+                // The tail of the strip shouldn't be clipped flush with the scroll edge.
                 .padding(.trailing, 2)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -113,9 +114,9 @@ public struct ClipboardTabView: View {
     }
 }
 
-/// Одна карточка ленты. Решение «вставить или скопировать» принимает
-/// контейнер (см. ClipboardTabView.body) по общему для всей ленты статусу
-/// ⌥ — карточка лишь сообщает о клике через onTap.
+/// A single strip card. The "paste or copy" decision is made by the
+/// container (see ClipboardTabView.body) based on the strip-wide ⌥
+/// status — the card just reports the tap via onTap.
 private struct ClipboardCardView: View {
     let card: ClipboardCard
     let isSelected: Bool
@@ -125,10 +126,10 @@ private struct ClipboardCardView: View {
     @State private var isHovering = false
 
     private static let width: CGFloat = 76
-    /// 202 pt — высота области содержимого раскрытой панели (PanelMetrics
-    /// .expandedSize.height 240, минус отступы NotchPanelView.tabBody: 240 −
-    /// 38 = 202). Та же величина и то же обоснование, что у MusicTabView
-    /// .artworkSize — карточка занимает её почти целиком, не убегая за край.
+    /// 202 pt — height of the expanded panel's content area (PanelMetrics
+    /// .expandedSize.height 240, minus NotchPanelView.tabBody's padding: 240 −
+    /// 38 = 202). Same value and same rationale as MusicTabView's
+    /// .artworkSize — the card fills nearly all of it without running off the edge.
     private static let height: CGFloat = 190
     private static let cornerRadius: CGFloat = 14
 
@@ -181,10 +182,10 @@ private struct ClipboardCardView: View {
         }
     }
 
-    /// Ради этого поля целиком и затевался Step 3: скриншот обязан
-    /// показывать себя, а не подпись «Снимок экрана» (см. thumbnail на
-    /// ClipboardCard). Запасной вариант ниже — честный случай отказа
-    /// декодирования байтов, а не ожидаемый путь.
+    /// This field is the entire reason Step 3 exists: a screenshot must
+    /// show itself, not a "Screenshot" caption (see thumbnail on
+    /// ClipboardCard). The fallback below is the honest case of a byte
+    /// decoding failure, not the expected path.
     @ViewBuilder
     private var imageContent: some View {
         if let thumbnail = card.thumbnail {
@@ -206,9 +207,10 @@ private struct ClipboardCardView: View {
         }
     }
 
-    /// Источник — единственная подпись внизу карточки. Акцентным цветом, а
-    /// не белым: тот же приём, что и у sourceBadge в MusicTabView, только
-    /// без капсулы — на 76 pt ширины ей не хватило бы места.
+    /// Source is the only caption at the bottom of the card. In the accent
+    /// color, not white: the same technique as sourceBadge in MusicTabView,
+    /// just without the capsule — there wouldn't be room for it at 76 pt
+    /// width.
     private var footer: some View {
         Text(card.source)
             .font(.system(size: 8, weight: .medium))
@@ -227,8 +229,8 @@ private struct ClipboardCardView: View {
         }
     }
 
-    /// Выделенная карточка обводится акцентным цветом — единственный цвет
-    /// «Обсидиана», остальное здесь белое разной прозрачности.
+    /// A selected card gets an accent-colored outline — the only color in
+    /// "Obsidian", everything else here is white at varying opacity.
     @ViewBuilder
     private var selectionOutline: some View {
         if isSelected {
@@ -239,11 +241,11 @@ private struct ClipboardCardView: View {
 
     private var accessibilityLabel: String {
         let kindLabel = switch card.kind {
-        case .text: "Текст"
-        case .image: "Изображение"
-        case .file: "Файл"
+        case .text: "Text"
+        case .image: "Image"
+        case .file: "File"
         }
-        let pinSuffix = card.isPinned ? ", закреплено" : ""
-        return "\(kindLabel): \(card.preview). Источник: \(card.source)\(pinSuffix)"
+        let pinSuffix = card.isPinned ? ", pinned" : ""
+        return "\(kindLabel): \(card.preview). Source: \(card.source)\(pinSuffix)"
     }
 }

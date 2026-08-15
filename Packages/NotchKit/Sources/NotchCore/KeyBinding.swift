@@ -1,4 +1,4 @@
-/// Клавиша в терминах, независимых от AppKit.
+/// A key expressed independently of AppKit.
 public enum PanelKey: Sendable, Equatable {
     case digit1, digit2, digit3, digit4
     case tab, escape
@@ -14,15 +14,15 @@ public struct PanelModifiers: OptionSet, Sendable {
     public static let shift = PanelModifiers(rawValue: 1 << 2)
 }
 
-/// Что делает клавиша в раскрытой панели.
+/// What a key does in the expanded panel.
 ///
-/// Отдельно от AppKit, потому что раскладка — это правило, а не механика:
-/// проверять «⌘2 открывает буфер» надо без окна и без нажатий.
+/// Separate from AppKit, because the layout is a rule, not a mechanism:
+/// checking "⌘2 opens the clipboard" should work without a window and without key presses.
 public enum KeyBinding {
     public static func event(forKeyCode key: PanelKey, modifiers: PanelModifiers) -> NotchEvent? {
         switch key {
-        // Цифры работают только с командой: без неё это обычный ввод,
-        // который должен попасть в поле поиска.
+        // Digits only work with Command: without it, this is regular input
+        // that should reach the search field.
         case .digit1 where modifiers.contains(.command): .selectTab(.music)
         case .digit2 where modifiers.contains(.command): .selectTab(.clipboard)
         case .digit3 where modifiers.contains(.command): .selectTab(.notes)

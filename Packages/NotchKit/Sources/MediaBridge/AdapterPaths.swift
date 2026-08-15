@@ -1,10 +1,10 @@
 import Foundation
 
-/// Пути к вендоренному адаптеру.
+/// Paths to the vendored adapter.
 ///
-/// Все обязаны быть абсолютными: спайк показал, что с относительным путём
-/// бридж падает с `Failed to load framework` — он резолвит фреймворк изнутри
-/// собственного процесса и ничего не знает о рабочем каталоге вызывающего.
+/// All must be absolute: a spike showed that with a relative path
+/// the bridge fails with `Failed to load framework` — it resolves the framework from within
+/// its own process and knows nothing about the caller's working directory.
 public struct AdapterPaths: Sendable, Equatable {
     public let perl: URL
     public let script: URL
@@ -16,7 +16,7 @@ public struct AdapterPaths: Sendable, Equatable {
         self.framework = framework
     }
 
-    /// Раскладка вендоренной копии в репозитории.
+    /// Layout of the vendored copy in the repository.
     public static func vendored(repoRoot: URL) -> AdapterPaths {
         AdapterPaths(
             perl: URL(fileURLWithPath: "/usr/bin/perl"),

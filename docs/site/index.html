@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Notchka — интерактивная чёлка для macOS</title>
-<meta name="description" content="Notchka превращает чёлку MacBook в панель управления музыкой, буфером обмена, заметками и закреплёнными сниппетами. Без единого сетевого запроса.">
+<title>Notchka — an interactive notch for macOS</title>
+<meta name="description" content="Notchka turns your MacBook's notch into a control panel for music, clipboard history, quick notes, and pinned snippets. Zero network requests.">
 <link rel="icon" href="favicon.png">
 <style>
   :root {
@@ -203,59 +203,58 @@
       <img class="logo" src="logo.png" alt="" width="96" height="96">
       <h1>Notchka</h1>
       <p class="lead">
-        Чёлка MacBook как интерактивная панель: музыка из любого источника, история
-        буфера обмена, быстрые заметки и закреплённые сниппеты. Без единого сетевого
-        запроса.
+        Your MacBook's notch as an interactive panel: music from any source, clipboard
+        history, quick notes, and pinned snippets. Zero network requests.
       </p>
       <div class="cta-row">
         <a class="btn-download" id="download-link" href="#" rel="noopener">
-          <span>Скачать для macOS</span>
+          <span>Download for macOS</span>
           <span class="version" id="download-version"></span>
         </a>
-        <a class="btn-secondary" id="releases-link" href="#" rel="noopener">Все релизы</a>
+        <a class="btn-secondary" id="releases-link" href="#" rel="noopener">All releases</a>
       </div>
       <p class="download-meta" id="download-meta" hidden>
-        Скачано <strong id="download-count">—</strong> раз
+        Downloaded <strong id="download-count">—</strong> times
       </p>
     </div>
   </header>
 
-  <section class="features" aria-label="Возможности">
+  <section class="features" aria-label="Features">
     <article class="feature">
-      <h3>Музыка отовсюду</h3>
-      <p>Apple Music, Spotify, YouTube в браузере — пауза, переключение, обложка и прогресс без расширений.</p>
+      <h3>Music from anywhere</h3>
+      <p>Apple Music, Spotify, YouTube in your browser — pause, skip, cover art, and progress, no extensions needed.</p>
     </article>
     <article class="feature">
-      <h3>Буфер обмена</h3>
-      <p>Текст, изображения, файлы с указанием источника. Пароли в ленту не попадают.</p>
+      <h3>Clipboard</h3>
+      <p>Text, images, and files with their source shown. Passwords never make it into the feed.</p>
     </article>
     <article class="feature">
-      <h3>Быстрые заметки</h3>
-      <p>Короткий текст под рукой, без отдельного приложения и лишних кликов.</p>
+      <h3>Quick notes</h3>
+      <p>Short text at your fingertips, no separate app and no extra clicks.</p>
     </article>
     <article class="feature">
-      <h3>Закреплённые сниппеты</h3>
-      <p>Почта, номер, другие частые значения. Клик вставляет, ⌥+клик копирует.</p>
+      <h3>Pinned snippets</h3>
+      <p>Email, phone number, other frequent values. Click to paste, ⌥+click to copy.</p>
     </article>
     <article class="feature">
-      <h3>Общий поиск</h3>
-      <p>Один запрос находит запись из буфера, заметку и пин одновременно.</p>
+      <h3>Unified search</h3>
+      <p>One query finds a clipboard entry, a note, and a pin all at once.</p>
     </article>
   </section>
 
   <section class="privacy">
-    <h2>Приватность по умолчанию</h2>
+    <h2>Private by default</h2>
     <p>
-      Notchka не делает ни одного сетевого запроса — ни телеметрии, ни аналитики, ни
-      проверки обновлений. Все данные остаются локально на диске. Число скачиваний выше
-      считает сам GitHub на своей стороне: приложение об этой странице ничего не знает.
+      Notchka makes zero network requests — no telemetry, no analytics, no update
+      checks. All data stays local on disk. The download count above is tallied
+      by GitHub on its own side: the app knows nothing about this page.
     </p>
   </section>
 </main>
 
 <footer>
   <p>
-    <a href="https://github.com/AGGIB/notchka" rel="noopener">Исходный код на GitHub</a>
+    <a href="https://github.com/AGGIB/notchka" rel="noopener">Source code on GitHub</a>
     · MIT License
   </p>
 </footer>
@@ -280,12 +279,12 @@
         downloadLink.href = dmgAsset.browser_download_url;
         downloadVersion.textContent = release.tag_name;
         downloadMeta.hidden = false;
-        downloadCount.textContent = dmgAsset.download_count.toLocaleString("ru-RU");
+        downloadCount.textContent = dmgAsset.download_count.toLocaleString("en-US");
       }
     })
     .catch(() => {
-      // Сеть недоступна или лимит GitHub API — ссылка на страницу релизов
-      // (уже проставлена выше) остаётся рабочим запасным вариантом.
+      // Network unavailable or GitHub API rate limit hit — the releases page
+      // link (already set above) remains a working fallback.
     });
 </script>
 </body>

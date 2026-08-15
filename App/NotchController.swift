@@ -3,33 +3,34 @@ import Observation
 import NotchCore
 import NotchUI
 
-/// Сводит воедино источники событий и машину состояний.
-/// Здесь же живёт правило: окно ловит мышь, пока панель не в `closed` —
-/// включая автопик `peek(.trackChanged)`, где курсор может быть далеко
-/// от горячей зоны (сработал на смену трека, а не на наведение); в
-/// `closed` мышь не ловится, иначе меню-бар был бы недоступен.
+/// Ties together event sources and the state machine.
+/// This is also where the rule lives: the window catches the mouse whenever
+/// the panel isn't `closed` — including the auto-peek `peek(.trackChanged)`,
+/// where the cursor can be far from the hot zone (triggered by a track
+/// change, not by hovering); in `closed` the mouse isn't caught, otherwise
+/// the menu bar would become unreachable.
 @MainActor
 @Observable
 final class NotchController {
     private(set) var state: NotchState = .closed
-    /// Приложение, бывшее фронтовым непосредственно перед разворотом панели.
+    /// The app that was frontmost immediately before the panel expanded.
     ///
-    /// Запасной вариант, а не основной источник: см. `pasteTarget`.
+    /// A fallback, not the primary source: see `pasteTarget`.
     private(set) var frontmostApplicationBeforeExpanding: NSRunningApplication?
 
-    /// Куда вставлять выбранное из истории.
+    /// Where to paste the item picked from history.
     ///
-    /// Спрашиваем систему в момент вставки, а не полагаемся на захват при
-    /// развороте: раскрытая панель не закрывается ни по уходу курсора, ни по
-    /// потере фокуса, так что между разворотом и кликом пользователь успевает
-    /// уйти ⌘Tab в другое приложение. Захваченное тогда указывало бы на то,
-    /// откуда он ушёл, и вставка приезжала бы не туда.
+    /// We ask the system at paste time rather than rely on the capture made
+    /// at expand time: an expanded panel doesn't close on cursor exit or on
+    /// loss of focus, so between expanding and clicking the user has time to
+    /// ⌘Tab away to another app. The captured value would then point to
+    /// wherever they left from, and the paste would land in the wrong place.
     ///
-    /// Захват остаётся страховкой ровно на один случай: если фронтовой в этот
-    /// момент — мы сами. Панель `.nonactivatingPanel` у accessory-приложения
-    /// фронтовым его делать не должна, но полагаться на это без живой
-    /// проверки не стоит, а разница между «вставить не туда» и «вставить в
-    /// себя» велика.
+    /// The capture remains a safety net for exactly one case: if we ourselves
+    /// are frontmost at that moment. A `.nonactivatingPanel` on an
+    /// accessory app shouldn't make it frontmost, but relying on that
+    /// without a live check isn't worth it — the difference between "pasted
+    /// in the wrong place" and "pasted into ourselves" is huge.
     var pasteTarget: NSRunningApplication? {
         let frontmost = NSWorkspace.shared.frontmostApplication
         guard frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier else { return frontmost }
@@ -51,13 +52,13 @@ final class NotchController {
     }
 
     func start() {
-        // Единственный источник истины про «closed ⇒ мышь прозрачна»:
-        // раньше это держалось только на том, что NotchPanel.init и
-        // syncMouseHandling() независимо друг от друга ставят одно и то же
-        // значение по умолчанию. Актуально и после re-derivation геометрии
-        // (см. AppDelegate.refreshNotchScreen) — при пересоздании панели
-        // start() вызывается заново, а при обновлении геометрии на месте
-        // state не меняется, так что синхронизировать нечего.
+        // The single source of truth for "closed ⇒ mouse-transparent": it
+        // used to rely solely on NotchPanel.init and syncMouseHandling()
+        // independently setting the same default value. Still holds after
+        // geometry re-derivation too (see AppDelegate.refreshNotchScreen) —
+        // when the panel is recreated, start() is called again, and when
+        // geometry is updated in place, state doesn't change, so there's
+        // nothing to sync.
         syncMouseHandling()
         cursor.start { [weak self] location, now in
             self?.cursorSampled(at: location, now: now)
@@ -65,37 +66,39 @@ final class NotchController {
         hotkey.register { [weak self] in
             self?.handle(.hotkey)
         }
-        // Раскрытая панель отдаёт сюда уже разобранные нажатия (см.
-        // NotchPanel.keyDown(with:)). Замыкание, а не сохранение self в
-        // самой панели — у панели и так есть путь к контроллеру, а обратная
-        // сильная ссылка вместе с private weak var panel выше замкнула бы
-        // цикл удержания.
+        // The expanded panel forwards already-parsed keypresses here (see
+        // NotchPanel.keyDown(with:)). A closure rather than storing self in
+        // the panel itself — the panel already has a path to the
+        // controller, and a strong back-reference together with the
+        // private weak var panel above would close a retain cycle.
         panel?.onKeyEvent = { [weak self] event in
             self?.handle(event)
         }
     }
 
-    /// Останавливает источники событий. Существует отдельно от deinit, потому
-    /// что на deinit полагаться нельзя: контроллер держит не только AppDelegate,
-    /// но и NSHostingView панели через NotchRootView, и обнуление ссылки в
-    /// AppDelegate само по себе не освобождает его. Оба вызова внутри
-    /// идемпотентны, так что повторный stop() (в том числе из deinit) безвреден.
+    /// Stops the event sources. Exists separately from deinit because deinit
+    /// can't be relied on: the controller is held not only by AppDelegate but
+    /// also by the panel's NSHostingView through NotchRootView, so clearing
+    /// the reference in AppDelegate alone doesn't release it. Both calls
+    /// inside are idempotent, so a repeated stop() (including from deinit)
+    /// is harmless.
     func stop() {
         cursor.stop()
         hotkey.unregister()
     }
 
     deinit {
-        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit.
+        // Same technique and same rationale as in HotkeyCenter.deinit.
         MainActor.assumeIsolated { stop() }
     }
 
-    /// Обновляет геометрию при смене конфигурации экранов — вызывается из
-    /// AppDelegate по NSApplication.didChangeScreenParametersNotification.
-    /// Видимое состояние панели не трогаем: экран сдвинулся, а не закрылся,
-    /// открытая панель не обязана из-за этого схлопнуться. Мониторы курсора
-    /// и хоткея тоже не трогаем — их пересоздание принадлежит AppDelegate,
-    /// когда чёлка пропадает или появляется целиком, а не просто двигается.
+    /// Updates the geometry when the screen configuration changes — called
+    /// from AppDelegate on NSApplication.didChangeScreenParametersNotification.
+    /// The panel's visible state is left untouched: the screen moved, it
+    /// didn't close, so an open panel isn't obligated to collapse because of
+    /// that. The cursor and hotkey monitors are left untouched too —
+    /// recreating them is AppDelegate's responsibility, for when the notch
+    /// disappears or appears entirely, not just moves.
     func updateGeometry(_ geometry: NotchGeometry, screenFrame: CGRect) {
         self.geometry = geometry
         self.screenFrame = screenFrame
@@ -105,14 +108,14 @@ final class NotchController {
         let wasExpanded = isExpanded(state)
         guard let newState = machine.handle(event) else { return }
 
-        // Заход в .expanded из .closed/.peek — последний момент, когда
-        // фронтовым ещё гарантированно остаётся чужое приложение: ниже
-        // syncMouseHandling() включит panel.acceptsKeyboard и отдаст панели
-        // право стать key-окном, после чего фронтовым будет уже сама
-        // Notchka. Сверяемся именно с предыдущим состоянием, а не только с
-        // новым, — иначе смена вкладки внутри уже открытой панели
-        // (selectTab, cycleTab: оба .expanded → .expanded) перезаписала бы
-        // захваченное приложение на саму Notchka.
+        // Entering .expanded from .closed/.peek is the last moment when the
+        // frontmost app is still guaranteed to be someone else's: below,
+        // syncMouseHandling() will turn on panel.acceptsKeyboard and let the
+        // panel become the key window, after which the frontmost app will be
+        // Notchka itself. We check against the previous state, not just the
+        // new one — otherwise switching tabs within an already-open panel
+        // (selectTab, cycleTab: both .expanded → .expanded) would overwrite
+        // the captured app with Notchka itself.
         if isExpanded(newState), !wasExpanded {
             frontmostApplicationBeforeExpanding = NSWorkspace.shared.frontmostApplication
         }
@@ -121,33 +124,38 @@ final class NotchController {
         syncMouseHandling()
     }
 
-    /// true для любой вкладки .expanded — конкретная вкладка тут не важна.
+    /// true for any .expanded tab — the specific tab doesn't matter here.
     private func isExpanded(_ state: NotchState) -> Bool {
         if case .expanded = state { return true }
         return false
     }
 
     private func cursorSampled(at location: CGPoint, now: Date) {
-        // NSEvent.mouseLocation задан в глобальных координатах AppKit: начало
-        // отсчёта — левый нижний угол всей раскладки мониторов, Y растёт вверх;
-        // это начало не обязано совпадать с левым нижним углом именно этого
-        // экрана (при нескольких дисплеях у screenFrame бывает ненулевой origin).
-        // NotchGeometry.hotZone, наоборот, всегда задана относительно своего
-        // экрана с началом в левом верхнем углу. Поэтому X переводится сдвигом
-        // на screenFrame.origin.x — переворота нет, в обеих системах X растёт
-        // вправо, — а Y вычитанием из screenFrame.maxY: здесь сдвиг и переворот
-        // совпадают в одном действии, потому что maxY уже равен origin.y + height.
+        // NSEvent.mouseLocation is given in global AppKit coordinates: the
+        // origin is the bottom-left corner of the entire monitor layout, Y
+        // grows upward; this origin doesn't have to coincide with the
+        // bottom-left corner of this particular screen (with multiple
+        // displays, screenFrame can have a non-zero origin).
+        // NotchGeometry.hotZone, on the other hand, is always given relative
+        // to its own screen with the origin at the top-left corner. So X is
+        // converted by shifting by screenFrame.origin.x — there's no flip,
+        // X grows rightward in both systems — while Y is converted by
+        // subtracting from screenFrame.maxY: here the shift and the flip
+        // coincide in a single operation, because maxY already equals
+        // origin.y + height.
         let screenRelative = CGPoint(
             x: location.x - screenFrame.origin.x,
             y: screenFrame.maxY - location.y
         )
 
-        // Пока панель закрыта, вход проверяется по узкой зоне выреза — она
-        // мала намеренно, чтобы курсор, просто скользящий к меню-бару, её не
-        // раскрывал. Но эта же зона меньше открытой панели (см. спеку §8),
-        // и как только панель открыта (peek или expanded), проверка должна
-        // идти по её текущим видимым границам — иначе наведение на саму
-        // панель означало бы выход из зоны входа и закрытие под курсором.
+        // While the panel is closed, entry is checked against the narrow
+        // notch zone — it's deliberately small so that a cursor merely
+        // gliding toward the menu bar doesn't open it. But that same zone is
+        // smaller than the open panel (see spec §8), and as soon as the
+        // panel is open (peek or expanded), the check needs to go against
+        // its current visible bounds — otherwise hovering over the panel
+        // itself would count as leaving the entry zone and it would close
+        // right under the cursor.
         let containmentZone: CGRect = switch state {
         case .closed:
             geometry.hotZone
@@ -162,16 +170,16 @@ final class NotchController {
         cursor.setTicking(debouncer.hasPendingTransition)
     }
 
-    /// Прозрачность окна для мыши и право принимать клавиатуру. Закрытая
-    /// панель не должна мешать меню-бару.
+    /// Mouse transparency of the window and the right to accept keyboard
+    /// input. A closed panel must not get in the menu bar's way.
     ///
-    /// В `.expanded` панель не только получает право стать key-окном, но и
-    /// делается им: `canBecomeKey` — это разрешение, а не действие. Панель
-    /// открывается глобальным хоткеем, который приложение не активирует, и
-    /// без явного `makeKey()` события клавиатуры в неё не приходят вовсе —
-    /// ни ⌘1…⌘4, ни ⇥, ни Esc, пока пользователь не кликнет внутрь. То есть
-    /// клавиатурное управление не работало бы ровно в том сценарии, ради
-    /// которого сделано.
+    /// In `.expanded` the panel not only gets the right to become the key
+    /// window, it's actually made one: `canBecomeKey` is a permission, not
+    /// an action. The panel is opened by a global hotkey that doesn't
+    /// activate the app, and without an explicit `makeKey()` keyboard
+    /// events never reach it at all — not ⌘1…⌘4, not ⇥, not Esc — until the
+    /// user clicks inside. In other words, keyboard control wouldn't work in
+    /// exactly the scenario it was built for.
     private func syncMouseHandling() {
         guard let panel else { return }
         switch state {

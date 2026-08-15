@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import MediaBridge
 
-/// Реальный payload из спайка, обложка обрезана.
+/// Real payload from the spike, artwork truncated.
 private let fullPayloadLine = """
 {"type":"data","diff":false,"payload":{"playbackRate":1,"album":"","elapsedTime":200.349576,\
 "timestamp":"2026-08-10T11:35:25Z","bundleIdentifier":"com.google.Chrome",\
@@ -11,10 +11,10 @@ private let fullPayloadLine = """
 "contentItemIdentifier":"F06E3460-AF16-445A-AF1E-2600F5CA2D5E","playing":true}}
 """
 
-@Test("полный снимок разбирается со всеми полями")
+@Test("a full snapshot parses with all fields")
 func fullSnapshotParses() throws {
     guard case .snapshot(let snapshot?) = AdapterLine.parse(fullPayloadLine) else {
-        Issue.record("ожидался снимок")
+        Issue.record("expected a snapshot")
         return
     }
     #expect(snapshot.title == "Deep Work Music")
@@ -25,62 +25,62 @@ func fullSnapshotParses() throws {
     #expect(abs(snapshot.duration - 7279.961) < 0.001)
     #expect(abs(snapshot.elapsedTime - 200.349576) < 0.001)
     #expect(snapshot.artworkData != nil)
-    // Chrome в этом payload заявляет себя напрямую — родителя адаптер не
-    // присылает, и это должно остаться nil, а не пустой строкой.
+    // Chrome reports itself directly in this payload — the adapter sends no
+    // parent, and that should stay nil, not turn into an empty string.
     #expect(snapshot.parentApplicationBundleID == nil)
 }
 
-/// Payload вспомогательного процесса Safari — эмпирическая находка Task 4:
-/// `bundleIdentifier` указывает на процесс рендеринга WebKit, а настоящее
-/// приложение приходит отдельным полем `parentApplicationBundleIdentifier`.
+/// Safari helper-process payload — an empirical finding from Task 4:
+/// `bundleIdentifier` points at the WebKit rendering process, and the real
+/// app arrives in a separate `parentApplicationBundleIdentifier` field.
 private let safariPayloadLine = """
 {"type":"data","diff":false,"payload":{"bundleIdentifier":"com.apple.WebKit.GPU",\
-"parentApplicationBundleIdentifier":"com.apple.Safari","title":"Трек",\
-"artist":"Исполнитель","album":"","duration":200,"elapsedTime":0,\
+"parentApplicationBundleIdentifier":"com.apple.Safari","title":"Track",\
+"artist":"Artist","album":"","duration":200,"elapsedTime":0,\
 "timestamp":"2026-08-10T11:35:25Z","playbackRate":1,"playing":true}}
 """
 
-@Test("вспомогательный процесс несёт bundle id родителя отдельным полем")
+@Test("a helper process carries the parent's bundle id in a separate field")
 func helperProcessCarriesParentBundleID() throws {
     guard case .snapshot(let snapshot?) = AdapterLine.parse(safariPayloadLine) else {
-        Issue.record("ожидался снимок")
+        Issue.record("expected a snapshot")
         return
     }
     #expect(snapshot.sourceBundleID == "com.apple.WebKit.GPU")
     #expect(snapshot.parentApplicationBundleID == "com.apple.Safari")
 }
 
-@Test("служебная первая строка потока значит «ничего не играет»")
+@Test("the stream's opening housekeeping line means \"nothing playing\"")
 func emptySnapshotMeansNoSession() {
     guard case .snapshot(let snapshot) = AdapterLine.parse(#"{"type":"data","diff":false,"payload":{}}"#) else {
-        Issue.record("ожидался снимок")
+        Issue.record("expected a snapshot")
         return
     }
     #expect(snapshot == nil)
 }
 
-@Test("дифф разбирается как частичный payload")
+@Test("a diff parses as a partial payload")
 func diffParsesAsPartial() throws {
     guard case .diff(let payload) = AdapterLine.parse(#"{"type":"data","diff":true,"payload":{"playing":true}}"#) else {
-        Issue.record("ожидался дифф")
+        Issue.record("expected a diff")
         return
     }
     #expect(payload.playing == true)
     #expect(payload.title == nil)
 }
 
-/// Опорный момент «сейчас» для тестов `applied(to:now:)`. Само значение
-/// значения не имеет — важно, что оно фиксировано и отличимо от меток
-/// времени в снимках ниже, чтобы тест на перепривязку не мог случайно
-/// совпасть с уже имеющейся timestamp.
+/// Reference "now" instant for the `applied(to:now:)` tests. The value
+/// itself doesn't matter — what matters is that it's fixed and distinct
+/// from the timestamps in the snapshots below, so the re-anchoring test
+/// can't accidentally collide with an existing timestamp.
 private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
-@Test("дифф накладывается на снимок, не затирая незаданные поля")
+@Test("a diff merges onto a snapshot without clobbering unset fields")
 func diffMergesWithoutClobbering() throws {
     guard case .snapshot(let base?) = AdapterLine.parse(fullPayloadLine),
           case .diff(let payload) = AdapterLine.parse(#"{"type":"data","diff":true,"payload":{"playing":false}}"#)
     else {
-        Issue.record("подготовка не удалась")
+        Issue.record("setup failed")
         return
     }
     let merged = try #require(payload.applied(to: base, now: now))
@@ -89,16 +89,16 @@ func diffMergesWithoutClobbering() throws {
     #expect(merged.sourceBundleID == "com.google.Chrome")
 }
 
-@Test("дифф playing:true без timestamp после паузы перепривязывает метку к now")
+@Test("a playing:true diff without a timestamp re-anchors the timestamp to now after a pause")
 func diffReanchorsTimestampOnFalseToTrueWithoutTimestamp() throws {
     guard case .snapshot(let playingBase?) = AdapterLine.parse(fullPayloadLine),
           case .diff(let payload) = AdapterLine.parse(#"{"type":"data","diff":true,"payload":{"playing":true}}"#)
     else {
-        Issue.record("подготовка не удалась")
+        Issue.record("setup failed")
         return
     }
-    // fullPayloadLine несёт playing:true — для перехода false→true нужен
-    // именно приостановленный снимок.
+    // fullPayloadLine carries playing:true — the false→true transition
+    // needs a paused snapshot to start from.
     var paused = playingBase
     paused.isPlaying = false
     let merged = try #require(payload.applied(to: paused, now: now))
@@ -106,10 +106,10 @@ func diffReanchorsTimestampOnFalseToTrueWithoutTimestamp() throws {
     #expect(merged.timestamp == now)
 }
 
-@Test("дифф playing:true со своим timestamp не перепривязывается к now")
+@Test("a playing:true diff with its own timestamp is not re-anchored to now")
 func diffKeepsAdapterTimestampWhenPresent() throws {
     guard case .snapshot(let playingBase?) = AdapterLine.parse(fullPayloadLine) else {
-        Issue.record("подготовка не удалась")
+        Issue.record("setup failed")
         return
     }
     var paused = playingBase
@@ -118,7 +118,7 @@ func diffKeepsAdapterTimestampWhenPresent() throws {
     guard case .diff(let payload) = AdapterLine.parse(
         #"{"type":"data","diff":true,"payload":{"playing":true,"timestamp":"2022-04-15T05:20:00Z"}}"#
     ) else {
-        Issue.record("подготовка не удалась")
+        Issue.record("setup failed")
         return
     }
     let merged = try #require(payload.applied(to: paused, now: now))
@@ -126,102 +126,103 @@ func diffKeepsAdapterTimestampWhenPresent() throws {
     #expect(merged.timestamp != now)
 }
 
-@Test("текст таймаута опознаётся как временная осечка, а не как мусор")
+@Test("timeout text is recognized as a transient failure, not garbage")
 func timeoutTextIsTransient() {
     let line = "Reading now playing information timed out after 2000 milliseconds"
     guard case .transientFailure(let text) = AdapterLine.parse(line) else {
-        Issue.record("ожидалась временная осечка")
+        Issue.record("expected a transient failure")
         return
     }
     #expect(text.contains("timed out"))
 }
 
-@Test("непонятная строка не роняет разбор")
+@Test("an unparsable line doesn't crash parsing")
 func garbageIsUnrecognised() {
-    guard case .unrecognized = AdapterLine.parse("{не json") else {
-        Issue.record("ожидалась неопознанная строка")
+    guard case .unrecognized = AdapterLine.parse("{not json") else {
+        Issue.record("expected an unrecognized line")
         return
     }
 }
 
-@Test("пустая строка не считается событием")
+@Test("a blank line doesn't count as an event")
 func blankLineIsUnrecognised() {
     guard case .unrecognized = AdapterLine.parse("   ") else {
-        Issue.record("ожидалась неопознанная строка")
+        Issue.record("expected an unrecognized line")
         return
     }
 }
 
-@Test("дифф до первого снимка не даёт состояния")
+@Test("a diff before the first snapshot yields no state")
 func diffBeforeSnapshotIsIgnored() {
     guard case .diff(let payload) = AdapterLine.parse(#"{"type":"data","diff":true,"payload":{"playing":true}}"#) else {
-        Issue.record("ожидался дифф")
+        Issue.record("expected a diff")
         return
     }
     let result = payload.applied(to: nil, now: now)
     #expect(result == nil)
 }
 
-@Test("валидный JSON с «timed out» внутри разбирается как снимок, не как осечка")
+@Test("valid JSON containing \"timed out\" parses as a snapshot, not a failure")
 func jsonWithTimeoutInDataIsNotTransientFailure() {
     let lineWithTimeoutInTitle = """
     {"type":"data","diff":false,"payload":{"title":"Reading timed out","artist":"Test","album":"","duration":0,"elapsedTime":0,"timestamp":"2026-08-10T11:35:25Z","bundleIdentifier":"test","playing":false}}
     """
     guard case .snapshot(let snapshot?) = AdapterLine.parse(lineWithTimeoutInTitle) else {
-        Issue.record("ожидался снимок")
+        Issue.record("expected a snapshot")
         return
     }
     #expect(snapshot.title == "Reading timed out")
 }
 
-// MARK: - parseSnapshot (голый payload команды `get`, без конверта)
+// MARK: - parseSnapshot (bare `get` command payload, no envelope)
 
-/// Дословный вывод `get`, снятый вручную с живой системы во время
-/// диагностики дефекта «панель навсегда застревает на источнике короткой
-/// интерцепции» — не выдуман. В отличие от строк `stream` выше, это голый
-/// `NowPlayingPayload`: `get` печатает его как есть, без конверта
-/// `{"type":..,"diff":..,"payload":..}`.
+/// Verbatim output of `get`, captured manually from a live system while
+/// diagnosing the "panel gets stuck forever on a brief interception's
+/// source" defect — not made up. Unlike the `stream` lines above, this is
+/// a bare `NowPlayingPayload`: `get` prints it as-is, with no
+/// `{"type":..,"diff":..,"payload":..}` envelope.
 private let getCommandPayloadLine =
     #"{"playbackRate":1,"album":"","elapsedTime":67.62,"timestamp":"2026-08-13T10:08:31Z","bundleIdentifier":"com.apple.WebKit.GPU","processIdentifier":63903,"parentApplicationBundleIdentifier":"com.apple.Safari","title":"Sam Smith - I'm Not The Only One (Lyrics)","uniqueIdentifier":6671484,"duration":237.561,"artist":"Dan Music","contentItemIdentifier":"6671484","playing":true}"#
 
-@Test("payload команды get разбирается в снимок с верными названием, исполнителем, длительностью и признаком воспроизведения")
+@Test("a get command payload parses into a snapshot with the right title, artist, duration, and playing flag")
 func getCommandPayloadParsesAsSnapshot() throws {
     let snapshot = try #require(AdapterLine.parseSnapshot(getCommandPayloadLine))
     #expect(snapshot.title == "Sam Smith - I'm Not The Only One (Lyrics)")
     #expect(snapshot.artist == "Dan Music")
     #expect(abs(snapshot.duration - 237.561) < 0.001)
     #expect(snapshot.isPlaying == true)
-    // Бонус к обязательным полям: этот payload — тот самый случай Safari
-    // (см. helperProcessCarriesParentBundleID выше), полезно убедиться, что
-    // parseSnapshot несёт то же различение источника, что и обычный parse.
+    // Bonus beyond the required fields: this payload is the same Safari
+    // case (see helperProcessCarriesParentBundleID above) — useful to
+    // confirm parseSnapshot carries the same source distinction as the
+    // regular parse.
     #expect(snapshot.sourceBundleID == "com.apple.WebKit.GPU")
     #expect(snapshot.parentApplicationBundleID == "com.apple.Safari")
     #expect(abs(snapshot.elapsedTime - 67.62) < 0.001)
 }
 
-@Test("голый payload get не распознаётся старым parse — ему нужен конверт")
+@Test("a bare get payload is not recognized by the old parse — it needs an envelope")
 func bareGetPayloadIsUnrecognizedByEnvelopeParse() {
-    // Регрессия ровно на то предостережение из постановки задачи: parse(_:)
-    // разбирает строки stream и требует конверт; формат get через него не
-    // должен молча превращаться в снимок или дифф.
+    // Regression on exactly the warning from the task brief: parse(_:)
+    // parses stream lines and requires an envelope; the get format must
+    // not silently turn into a snapshot or a diff through it.
     guard case .unrecognized = AdapterLine.parse(getCommandPayloadLine) else {
-        Issue.record("голый payload get не должен проходить через parse(_:) как снимок или дифф")
+        Issue.record("a bare get payload must not pass through parse(_:) as a snapshot or diff")
         return
     }
 }
 
-@Test("parseSnapshot не путает конверт stream с голым payload")
+@Test("parseSnapshot doesn't mistake a stream envelope for a bare payload")
 func parseSnapshotIgnoresEnvelopedLine() {
-    // Обратная сторона теста выше: конверт stream — тоже валидный JSON, но
-    // его поля лежат внутри вложенного "payload", а не на верхнем уровне.
-    // parseSnapshot ищет title/artist/... на верхнем уровне и не должен
-    // выдумывать трек из вложенного объекта — просто не найдёт ни одного
-    // поля и вернёт nil (isEmpty), а не упадёт и не соберёт мусор.
+    // The flip side of the test above: a stream envelope is also valid
+    // JSON, but its fields live inside a nested "payload", not at the top
+    // level. parseSnapshot looks for title/artist/... at the top level and
+    // must not invent a track from the nested object — it should just find
+    // no fields and return nil (isEmpty), not crash or assemble garbage.
     #expect(AdapterLine.parseSnapshot(fullPayloadLine) == nil)
 }
 
-@Test("parseSnapshot не падает на мусоре")
+@Test("parseSnapshot doesn't crash on garbage")
 func parseSnapshotHandlesGarbage() {
-    #expect(AdapterLine.parseSnapshot("{не json") == nil)
+    #expect(AdapterLine.parseSnapshot("{not json") == nil)
     #expect(AdapterLine.parseSnapshot("   ") == nil)
 }

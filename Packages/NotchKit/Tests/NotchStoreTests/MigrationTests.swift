@@ -9,16 +9,17 @@ private func migratedDatabase() throws -> NotchDatabase {
     return database
 }
 
-@Test("после миграций существуют все четыре таблицы")
+@Test("all four tables exist after migrations")
 func allTablesExist() throws {
     let database = try migratedDatabase()
     try database.queue.read { db in
-        // Чтение вынесено в let, а не `#expect(try ...)` сразу в аргументе:
-        // компилятор Swift 6.3 не считает try внутри #expect обработанным,
-        // если #expect вызван внутри замыкания — сборка падает с "errors
-        // thrown from here are not handled" (баг swiftlang/swift#78395).
-        // Это обход бага компилятора, а не требование стиля — тот же
-        // приём повторён ниже везде, где встречается этот паттерн.
+        // The read is pulled out into a let instead of `#expect(try ...)`
+        // directly in the argument: the Swift 6.3 compiler doesn't consider
+        // try inside #expect handled when #expect is called inside a
+        // closure — the build fails with "errors thrown from here are not
+        // handled" (compiler bug swiftlang/swift#78395). This is a
+        // workaround for the compiler bug, not a style requirement — the
+        // same trick is repeated below everywhere this pattern occurs.
         let hasClipboardItems = try db.tableExists("clipboard_items")
         let hasNotes = try db.tableExists("notes")
         let hasSnippets = try db.tableExists("snippets")
@@ -30,17 +31,18 @@ func allTablesExist() throws {
     }
 }
 
-// Имя нарочно не `migrationIsIdempotent`: такая функция уже есть в
-// NotchDatabaseTests того же тест-таргета, и вторая с тем же именем —
-// ошибка повторного объявления, а не два теста.
-@Test("повторная миграция не теряет уже сохранённые строки")
+// Deliberately not named `migrationIsIdempotent`: a function with that
+// name already exists in NotchDatabaseTests in the same test target, and
+// a second one with the same name would be a redeclaration error, not two
+// tests.
+@Test("re-running migration doesn't lose already saved rows")
 func migrationPreservesExistingRows() throws {
     let location = StoreLocation.temporary()
     let first = try NotchDatabase(location: location)
     try first.migrate()
     try first.queue.write { db in
         try db.execute(sql: "INSERT INTO notes (body, created_at, updated_at) VALUES (?, ?, ?)",
-                       arguments: ["сохранить меня", Date(), Date()])
+                       arguments: ["save me", Date(), Date()])
     }
 
     let second = try NotchDatabase(location: location)
@@ -51,14 +53,14 @@ func migrationPreservesExistingRows() throws {
     #expect(count == 1)
 }
 
-@Test("порядок пинов хранится и уникален не требуется — дубли порядка допустимы")
+@Test("pin order is stored and uniqueness isn't required — duplicate order values are allowed")
 func snippetOrderColumnExists() throws {
     let database = try migratedDatabase()
     try database.queue.write { db in
         for order in [1, 1, 2] {
             try db.execute(
                 sql: "INSERT INTO snippets (label, value, sort_order, is_sensitive, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                arguments: ["л", "з", order, false, Date(), Date()]
+                arguments: ["label", "value", order, false, Date(), Date()]
             )
         }
         let snippetCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM snippets")
@@ -66,30 +68,33 @@ func snippetOrderColumnExists() throws {
     }
 }
 
-/// Проверяет само решение, а не наличие таблицы: индекс не связан с
-/// владельцами внешними ключами, поэтому удаление записи НЕ уносит с собой
-/// её строку индекса. Чистка — обязанность репозитория, и именно на ней
-/// держится то, что удалённая заметка перестаёт находиться поиском.
+/// Tests the actual design decision, not just table existence: the index
+/// isn't linked to owners via foreign keys, so deleting a record does NOT
+/// take its index row down with it. Cleanup is the repository's
+/// responsibility, and that's exactly what makes a deleted note stop
+/// showing up in search.
 ///
-/// Прошлая версия этого теста проверяла только `tableExists` — ровно то же,
-/// что и `allTablesExist` строкой выше, — и прошла бы при любой схеме, в том
-/// числе с каскадным удалением, которого мы как раз не хотим.
+/// The previous version of this test only checked `tableExists` — exactly
+/// the same thing `allTablesExist` checks above — and would have passed
+/// under any schema, including one with cascading deletes, which is
+/// precisely what we don't want.
 ///
-/// Сама таблица индекса при этом обычная FTS5, НЕ contentless: план 3 выбрал
-/// так намеренно, потому что из contentless нельзя удалять обычным
-/// `DELETE ... WHERE`, а именно им её и чистят. Не «оптимизировать» обратно.
-@Test("удаление владельца не уносит строку индекса — чистит репозиторий")
+/// The index table itself is a plain FTS5 table, NOT contentless: plan 3
+/// chose this deliberately, because you can't delete from a contentless
+/// table with a plain `DELETE ... WHERE`, which is exactly how it gets
+/// cleaned up. Do not "optimize" this back.
+@Test("deleting the owner doesn't take the index row with it — the repository cleans it up")
 func searchIndexSurvivesOwnerDeletion() throws {
     let database = try migratedDatabase()
     try database.queue.write { db in
         try db.execute(
             sql: "INSERT INTO notes (body, created_at, updated_at) VALUES (?, ?, ?)",
-            arguments: ["заметка", Date(), Date()]
+            arguments: ["note", Date(), Date()]
         )
         let noteID = db.lastInsertedRowID
         try db.execute(
             sql: "INSERT INTO search_index (owner_kind, owner_id, title, body) VALUES (?, ?, ?, ?)",
-            arguments: ["note", noteID, "", "заметка"]
+            arguments: ["note", noteID, "", "note"]
         )
         try db.execute(sql: "DELETE FROM notes WHERE id = ?", arguments: [noteID])
     }

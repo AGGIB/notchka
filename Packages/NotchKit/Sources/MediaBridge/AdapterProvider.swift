@@ -1,47 +1,49 @@
 import Foundation
 import os
 
-/// Провайдер поверх perl-адаптера: держит поток живым и склеивает строки.
+/// Provider on top of the perl adapter: keeps the stream alive and stitches lines together.
 ///
-/// Насос на актор — не больше одного одновременно: `snapshots` кеширует
-/// уже поднятый поток и задачу в `activePump` и на повторное обращение
-/// отдаёт их же, а не поднимает второй процесс адаптера поверх первого
-/// (подробности — на самом `snapshots`).
+/// The pump is per-actor — never more than one at a time: `snapshots` caches
+/// an already-started stream and its task in `activePump` and returns the
+/// same ones on repeat access, instead of spinning up a second adapter
+/// process on top of the first (details are on `snapshots` itself).
 public actor AdapterProvider: NowPlayingProvider {
     private let paths: AdapterPaths
     private let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "media")
     private var process: AdapterProcess?
 
-    /// Текущий поднятый насос: поток для потребителей и задача, которая его
-    /// наполняет. Одно поле — гарантия того, что насосов не бывает больше
-    /// одного одновременно; пишет его только `startPump()`.
+    /// The currently running pump: the stream for consumers and the task
+    /// that feeds it. A single field guarantees there is never more than
+    /// one pump at a time; only `startPump()` writes it.
     private var activePump: (stream: AsyncStream<NowPlayingSnapshot?>, task: Task<Void, Never>)?
 
-    /// Сколько раз актор поднимал новый насос за свою жизнь.
+    /// How many times the actor has started a new pump over its lifetime.
     ///
-    /// Существует только ради тестов. У `AsyncStream` и `Task` нет
-    /// публичного способа сравнить два значения на идентичность, поэтому
-    /// свойство «повторное обращение к `snapshots` не подняло второй насос»
-    /// нельзя проверить равенством возвращаемых значений — счётчик такую
-    /// проверку заменяет, не запуская perl.
+    /// Exists only for tests. `AsyncStream` and `Task` have no public way to
+    /// compare two values for identity, so the property "repeat access to
+    /// `snapshots` didn't start a second pump" can't be verified by
+    /// equality of the returned values — this counter substitutes for that
+    /// check without running perl.
     private(set) var pumpsStarted = 0
 
-    /// Сколько поток обязан прожить, чтобы адаптер считался рабочим, а не
-    /// умирающим сразу после подключения.
+    /// How long the stream has to survive for the adapter to be considered
+    /// working, rather than dying right after connecting.
     ///
-    /// Спайк намерил: первая строка после подключения — всегда служебная
-    /// `{"diff":false,"payload":{}}`, а на команду до появления diff-строк в
-    /// потоке уходят «сотни миллисекунд», не единицы секунд. 5 секунд —
-    /// с большим запасом выше этого шума (старт процесса, первая строка,
-    /// пара обменов), но заметно меньше первой по-настоящему чувствительной
-    /// паузы эскалации, так что честно живой, но медленный адаптер не
-    /// штрафуется наравне с тем, что падает сразу за служебной строкой.
+    /// A spike measured this: the first line after connecting is always the
+    /// housekeeping `{"diff":false,"payload":{}}`, and it takes "hundreds of
+    /// milliseconds", not whole seconds, before diff lines start showing up
+    /// in the stream. 5 seconds gives a comfortable margin above that noise
+    /// (process startup, first line, a couple of exchanges), while staying
+    /// well below the first genuinely significant escalation pause, so a
+    /// genuinely alive but slow adapter isn't penalized the same as one
+    /// that dies right after the housekeeping line.
     static let restartLivenessThreshold: TimeInterval = 5
 
-    /// Чистая проверка «прожил достаточно», вынесенная из `pump(into:)`
-    /// отдельной функцией специально ради юнит-теста: сам `pump` гоняет
-    /// настоящий процесс адаптера и подъёмом изолированного потока не
-    /// проверяется без perl, а эта проверка — обычное сравнение дат.
+    /// A pure "lived long enough" check, factored out of `pump(into:)`
+    /// into its own function specifically for unit testing: `pump` itself
+    /// drives a real adapter process and can't be exercised in isolation
+    /// without perl, whereas this check is just an ordinary date
+    /// comparison.
     static func survivedLongEnoughToResetBackoff(openedAt: Date, closedAt: Date) -> Bool {
         closedAt.timeIntervalSince(openedAt) >= Self.restartLivenessThreshold
     }
@@ -50,19 +52,20 @@ public actor AdapterProvider: NowPlayingProvider {
         self.paths = paths
     }
 
-    /// Поток снимков.
+    /// Stream of snapshots.
     ///
-    /// Контракт: НЕ мультикаст. `AsyncStream` не размножает элементы между
-    /// потребителями — если к уже поднятому потоку подключатся двое через
-    /// `for await`, каждый снимок достанется ровно одному из них, а не
-    /// продублируется обоим. Рассчитан на одного потребителя одновременно,
-    /// как во всём плане сейчас; настоящую рассылку этот тип не реализует и
-    /// не обязан.
+    /// Contract: NOT multicast. `AsyncStream` does not fan out elements to
+    /// multiple consumers — if two consumers attach to an already-running
+    /// stream via `for await`, each snapshot goes to exactly one of them,
+    /// not to both. Designed for a single consumer at a time, matching the
+    /// current plan overall; this type doesn't implement real broadcast
+    /// and isn't meant to.
     ///
-    /// Повторное обращение, пока насос жив, отдаёт уже поднятый поток, а не
-    /// поднимает второй. Насос перестаёт считаться живым сразу, как только
-    /// его задачу отменили (единственный способ ей завершиться, см. `pump`)
-    /// — тогда обращение поднимает новый, рабочий, а не отдаёт мёртвый.
+    /// Repeat access while the pump is alive returns the already-running
+    /// stream instead of starting a second one. The pump stops being
+    /// considered alive the moment its task is cancelled (the only way for
+    /// it to finish, see `pump`) — at that point access starts a fresh,
+    /// working one instead of returning a dead one.
     public var snapshots: AsyncStream<NowPlayingSnapshot?> {
         get async {
             if let activePump, !activePump.task.isCancelled {
@@ -78,61 +81,64 @@ public actor AdapterProvider: NowPlayingProvider {
         try await adapter.send(code: command.adapterCode)
     }
 
-    /// Разовая пересинхронизация через `get` — см. doc протокола для
-    /// причины, по которой она вообще нужна.
+    /// One-off resync via `get` — see the protocol doc for why it's
+    /// needed at all.
     ///
-    /// Тот же `process`, что и у `send(_:)` выше, а не отдельное поле:
-    /// `AdapterProcess` из этого поля — просто удобный держатель короткоживущих
-    /// команд (`send`/`get` сами по себе не трогают `streamProcess`, тот
-    /// принадлежит насосу в `pump(into:)`), заводить второй экземпляр под
-    /// то же самое незачем.
+    /// Reuses the same `process` as `send(_:)` above rather than a separate
+    /// field: the `AdapterProcess` held in this field is just a convenient
+    /// holder for short-lived commands (`send`/`get` never touch
+    /// `streamProcess` themselves — that one belongs to the pump in
+    /// `pump(into:)`), so there's no reason to spin up a second instance
+    /// for the same purpose.
     ///
-    /// Накопитель `pump(into:)` (`SnapshotAccumulator`) сюда не привлекается
-    /// и не обновляется: он локален для тела `pump(into:)` и существует
-    /// ради того, чтобы мержить диффы поверх последнего снимка потока — а
-    /// `get` уже отдаёт полное состояние, мержить не с чем. Это асимметрично
-    /// по отношению к потоку (следующий дифф из потока, если он вообще
-    /// придёт, ляжет поверх старой базы накопителя, а не поверх того, что
-    /// вернул этот refresh), но чинить это не входит в задачу: сам дефект
-    /// в том, что для интерцепции продолжения диффов и не бывает.
+    /// The `pump(into:)` accumulator (`SnapshotAccumulator`) is neither
+    /// consulted nor updated here: it's local to the body of `pump(into:)`
+    /// and exists to merge diffs on top of the stream's last snapshot —
+    /// `get` already returns full state, so there's nothing to merge. This
+    /// is asymmetric with respect to the stream (the next diff from the
+    /// stream, if one ever arrives, will land on top of the accumulator's
+    /// stale base rather than on top of what this refresh returned), but
+    /// fixing that is out of scope here: the underlying defect is that
+    /// there's no mechanism to intercept the diff sequence.
     public func refresh() async throws -> NowPlayingSnapshot? {
         let adapter = process ?? AdapterProcess(paths: paths)
         process = adapter
         do {
             return try await adapter.get()
         } catch {
-            // Логируем и бросаем дальше, а не гасим в nil: nil означал бы
-            // «ничего не играет», и панель очистилась бы у пользователя,
-            // у которого музыка идёт.
-            logger.error("не удалось выполнить пересинхронизацию get: \(error.localizedDescription, privacy: .public)")
+            // Log and rethrow, rather than swallowing into nil: nil would
+            // mean "nothing is playing", and the panel would clear for a
+            // user who actually has music playing.
+            logger.error("failed to perform get resync: \(error.localizedDescription, privacy: .public)")
             throw error
         }
     }
 
-    /// Немедленно и гарантированно останавливает насос: не просто просит
-    /// отмены, а дожидается, пока pump(into:) реально дойдёт до конца
-    /// (его собственный хвост уже шлёт SIGINT адаптеру через process?.stop()
-    /// и закрывает continuation — см. pump(into:) ниже). Ленивого
-    /// распространения отмены через AsyncStream (как это происходит при
-    /// обычном отключении последнего потребителя) здесь недостаточно: тот
-    /// путь ничего не гарантирует ВЫЗЫВАЮЩЕЙ стороне о том, что процесс уже
-    /// остановлен к моменту возврата, а именно эта гарантия нужна перед
-    /// выходом из приложения.
+    /// Immediately and reliably stops the pump: not just requesting
+    /// cancellation, but waiting until pump(into:) actually runs to
+    /// completion (its own tail already sends SIGINT to the adapter via
+    /// process?.stop() and closes the continuation — see pump(into:)
+    /// below). Lazy cancellation propagation through AsyncStream (as
+    /// happens on ordinary disconnection of the last consumer) isn't
+    /// enough here: that path gives the CALLER no guarantee that the
+    /// process has already stopped by the time it returns, and that
+    /// guarantee is exactly what's needed before the app quits.
     public func shutdown() async {
         guard let activePump else { return }
         activePump.task.cancel()
         await activePump.task.value
     }
 
-    /// Поднимает новый насос и запоминает его в `activePump`.
+    /// Starts a new pump and stores it in `activePump`.
     ///
-    /// `AsyncStream.makeStream`, а не `AsyncStream.init(_:)` с замыканием:
-    /// в `activePump` нужно сохранить саму `Task`, а не только поток, а
-    /// `Task` создаётся уже после того, как получена `continuation`.
-    /// `makeStream` отдаёт `continuation` обычным значением синхронно, без
-    /// замыкания, — весь код ниже линейный и не поднимает вопрос о том, что
-    /// можно писать из тела `AsyncStream.init`, а что нет (ср. комментарий
-    /// про `@Sendable`-замыкание в `AdapterProcess.lines()`).
+    /// `AsyncStream.makeStream`, not `AsyncStream.init(_:)` with a closure:
+    /// `activePump` needs to hold the `Task` itself, not just the stream,
+    /// and the `Task` is only created after the `continuation` has been
+    /// obtained. `makeStream` hands back `continuation` as an ordinary
+    /// value synchronously, with no closure involved — all the code below
+    /// is linear and never raises the question of what can and can't be
+    /// written from inside an `AsyncStream.init` body (cf. the comment
+    /// about the `@Sendable` closure in `AdapterProcess.lines()`).
     private func startPump() -> AsyncStream<NowPlayingSnapshot?> {
         let (stream, continuation) = AsyncStream.makeStream(of: NowPlayingSnapshot?.self)
         let task = Task { await self.pump(into: continuation) }
@@ -142,14 +148,15 @@ public actor AdapterProvider: NowPlayingProvider {
         return stream
     }
 
-    /// Поднимает поток, склеивает строки и переподнимает его при обрыве.
+    /// Starts the stream, stitches lines together, and restarts it on
+    /// disconnect.
     ///
-    /// Новый `AdapterProcess` создаётся на каждую попытку, а не переиспользуется:
-    /// у актора одно поле под текущий процесс без токена поколения, и его
-    /// уборка при обрыве потока идёт отдельным detached `Task` (см.
-    /// `AdapterProcess.lines()`). Повторный вызов `lines()` на одном и том же
-    /// экземпляре рисковал бы тем, что запоздавшая уборка от предыдущего
-    /// потока прервёт только что поднятый.
+    /// A new `AdapterProcess` is created for each attempt rather than
+    /// reused: the actor has a single field for the current process with
+    /// no generation token, and its cleanup on stream disconnect runs on a
+    /// separate detached `Task` (see `AdapterProcess.lines()`). Calling
+    /// `lines()` again on the same instance would risk delayed cleanup
+    /// from the previous stream tearing down the one just started.
     private func pump(into continuation: AsyncStream<NowPlayingSnapshot?>.Continuation) async {
         var policy = RestartPolicy()
         var accumulator = SnapshotAccumulator()
@@ -165,19 +172,20 @@ public actor AdapterProvider: NowPlayingProvider {
 
             guard !Task.isCancelled else { break }
 
-            // Живучесть меряется временем жизни потока, а не фактом «пришла
-            // ли хоть одна строка»: спайк установил, что первая строка после
-            // подключения — всегда служебная {"diff":false,"payload":{}},
-            // даже если адаптер падает сразу вслед за ней. Судить по факту
-            // любой строки означало бы сбрасывать паузу на каждой попытке
-            // для адаптера, который умер навсегда, — ровно тот случай, ради
-            // которого нарастающий backoff и существует; он бы держался на
-            // нижней ступени бесконечно вместо того, чтобы вырасти до потолка.
+            // Liveness is measured by the stream's lifetime, not by whether
+            // any line arrived at all: the spike established that the
+            // first line after connecting is always the housekeeping
+            // {"diff":false,"payload":{}}, even if the adapter dies right
+            // after it. Judging by any line arriving would reset the delay
+            // on every attempt for an adapter that has died for good —
+            // exactly the case the growing backoff exists for; it would
+            // stay stuck at the bottom step forever instead of climbing to
+            // the ceiling.
             if Self.survivedLongEnoughToResetBackoff(openedAt: openedAt, closedAt: Date()) {
                 policy.reset()
             }
             let delay = policy.nextDelay()
-            logger.notice("поток адаптера оборван, повтор через \(delay, privacy: .public) с")
+            logger.notice("adapter stream disconnected, retrying in \(delay, privacy: .public) s")
             try? await Task.sleep(for: .seconds(delay))
         }
 

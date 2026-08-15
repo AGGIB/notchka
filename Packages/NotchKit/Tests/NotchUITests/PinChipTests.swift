@@ -1,35 +1,35 @@
 import Testing
 @testable import NotchUI
 
-@Test("обычный пин показывает значение")
+@Test("plain pin shows its value")
 func plainPinShowsValue() {
-    let chip = PinChip(id: 1, label: "Почта", value: "a@b.kz", isSensitive: false, colorHex: nil, icon: nil)
+    let chip = PinChip(id: 1, label: "Mail", value: "a@b.kz", isSensitive: false, colorHex: nil, icon: nil)
     #expect(chip.displayValue == "a@b.kz")
 }
 
-@Test("чувствительный пин показывает маску, а не значение")
+@Test("sensitive pin shows a mask, not the value")
 func sensitivePinIsMasked() {
-    let chip = PinChip(id: 2, label: "ИИН", value: "123456789012", isSensitive: true, colorHex: nil, icon: nil)
+    let chip = PinChip(id: 2, label: "IIN", value: "123456789012", isSensitive: true, colorHex: nil, icon: nil)
     #expect(chip.displayValue.contains("123456") == false)
     #expect(chip.displayValue.contains("•"))
 }
 
-@Test("вставляется настоящее значение, а не маска")
+@Test("pasting inserts the real value, not the mask")
 func pasteUsesRealValue() {
-    let chip = PinChip(id: 3, label: "ИИН", value: "123456789012", isSensitive: true, colorHex: nil, icon: nil)
+    let chip = PinChip(id: 3, label: "IIN", value: "123456789012", isSensitive: true, colorHex: nil, icon: nil)
     #expect(chip.pasteValue == "123456789012")
 }
 
-@Test("длинное значение обрезается в подписи, но не при вставке")
+@Test("long value is truncated for display only, not on paste")
 func longValueIsTruncatedOnlyForDisplay() {
     let long = String(repeating: "9", count: 100)
-    let chip = PinChip(id: 4, label: "Длинный", value: long, isSensitive: false, colorHex: nil, icon: nil)
+    let chip = PinChip(id: 4, label: "Long", value: long, isSensitive: false, colorHex: nil, icon: nil)
     #expect(chip.displayValue.count < long.count)
     #expect(chip.pasteValue == long)
 }
 
-@Test("некорректный цвет не роняет карточку")
+@Test("an invalid color doesn't crash the card")
 func badColourFallsBack() {
-    let chip = PinChip(id: 5, label: "П", value: "з", isSensitive: false, colorHex: "не цвет", icon: nil)
+    let chip = PinChip(id: 5, label: "P", value: "z", isSensitive: false, colorHex: "not a color", icon: nil)
     #expect(chip.accentOrDefault != nil)
 }

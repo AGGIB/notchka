@@ -2,35 +2,36 @@ import AppKit
 import SwiftUI
 import NotchCore
 
-/// Окно панели. Размер постоянен и равен максимальному развороту:
-/// менять фрейм NSWindow во время пружины — значит получить рывки,
-/// поэтому анимируется только содержимое внутри.
+/// Panel window. Size is constant and equal to the maximum expanded state:
+/// changing the NSWindow frame during the spring animation means jank,
+/// so only the content inside is animated.
 final class NotchPanel: NSPanel {
-    /// Разрешает панели стать key-окном. Включается только на время
-    /// разворота с полем поиска, иначе панель отобрала бы фокус
-    /// у приложения, куда мы собираемся вставлять текст.
+    /// Allows the panel to become the key window. Enabled only while
+    /// expanded with a search field, otherwise the panel would steal focus
+    /// from the app we're about to insert text into.
     var acceptsKeyboard = false
 
-    /// Куда уходит разобранное нажатие клавиши из keyDown(with:). Подключается
-    /// снаружи (см. NotchController.start()) замыканием, а не хранением самого
-    /// контроллера: у NotchController уже есть `weak var panel` в обратную
-    /// сторону, и сильная ссылка здесь замкнула бы цикл удержания.
+    /// Where the parsed key press from keyDown(with:) goes. Wired up
+    /// externally (see NotchController.start()) via a closure rather than by
+    /// holding the controller itself: NotchController already has a
+    /// `weak var panel` pointing back the other way, and a strong reference
+    /// here would close a retain cycle.
     var onKeyEvent: ((NotchEvent) -> Void)?
 
     override var canBecomeKey: Bool { acceptsKeyboard }
     override var canBecomeMain: Bool { false }
 
-    /// Отпускает клавиатурный фокус, если он у панели.
+    /// Releases keyboard focus if the panel holds it.
     ///
-    /// Просто снять `acceptsKeyboard` мало: окно, уже ставшее key, таковым и
-    /// остаётся, и продолжало бы забирать нажатия у приложения, в котором
-    /// пользователь работает, после схлопывания панели.
+    /// Just clearing `acceptsKeyboard` isn't enough: a window that has
+    /// already become key stays key, and would keep stealing keystrokes
+    /// from the app the user is working in after the panel collapses.
     func resignKeyIfNeeded() {
         guard isKeyWindow else { return }
         resignKey()
-        // Фокус возвращается тому, у кого он был до нас. Без этого клавиатура
-        // осталась бы висеть в воздухе: у accessory-приложения нет других
-        // окон, которым её можно передать.
+        // Focus goes back to whoever had it before us. Without this the
+        // keyboard would be left hanging: an accessory app has no other
+        // windows to hand it off to.
         NSApp.deactivate()
     }
 
@@ -43,24 +44,25 @@ final class NotchPanel: NSPanel {
         )
 
         isFloatingPanel = true
-        // Выше меню-бара: панель должна перекрывать его, а не прятаться под ним.
+        // Above the menu bar: the panel must cover it, not hide underneath.
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenNone, .ignoresCycle]
 
         isOpaque = false
         backgroundColor = .clear
-        // NSWindow по умолчанию сам себя освобождает при close(), а ARC об этом
-        // не знает и освободит окно второй раз по своей сильной ссылке.
-        // AppDelegate закрывает панель явно, когда чёлка пропадает с экрана.
+        // NSWindow releases itself by default on close(), and ARC doesn't
+        // know that and would release the window a second time via its own
+        // strong reference. AppDelegate closes the panel explicitly when the
+        // notch disappears from the screen.
         isReleasedWhenClosed = false
-        // Тень рисуем сами — системная не умеет вогнутые углы.
+        // We draw the shadow ourselves — the system one can't do concave corners.
         hasShadow = false
         isMovable = false
         isMovableByWindowBackground = false
         hidesOnDeactivate = false
-        // По умолчанию окно прозрачно для мыши, иначе оно перехватит
-        // клики по меню-бару. Дальше переключается NotchController
-        // .syncMouseHandling() по текущему состоянию панели.
+        // By default the window is transparent to mouse events, otherwise it
+        // would intercept clicks on the menu bar. NotchController
+        // .syncMouseHandling() toggles this based on the panel's current state.
         ignoresMouseEvents = true
 
         let hosting = NSHostingView(rootView: rootView)
@@ -68,12 +70,12 @@ final class NotchPanel: NSPanel {
         contentView = hosting
     }
 
-    /// Долетает сюда только пока панель — key-окно, то есть только в
-    /// .expanded (acceptsKeyboard управляется NotchController
-    /// .syncMouseHandling()), поэтому отдельная проверка состояния внутри
-    /// не нужна. Нераспознанная раскладкой клавиша обязана уйти дальше по
-    /// цепочке ответчиков через super — иначе поле поиска (следующий план)
-    /// не получило бы ни одного печатного символа.
+    /// Only reaches here while the panel is the key window, i.e. only in
+    /// .expanded (acceptsKeyboard is managed by NotchController
+    /// .syncMouseHandling()), so no separate state check is needed inside.
+    /// A key not recognized by the binding must keep going down the
+    /// responder chain via super — otherwise the search field (next up)
+    /// wouldn't get a single printable character.
     override func keyDown(with event: NSEvent) {
         let key = PanelKeyHandler.panelKey(for: event)
         let modifiers = PanelKeyHandler.panelModifiers(for: event)

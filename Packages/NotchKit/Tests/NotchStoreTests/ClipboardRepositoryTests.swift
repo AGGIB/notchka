@@ -12,37 +12,37 @@ private func makeRepository() throws -> ClipboardRepository {
 
 private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
-@Test("сохранённый текст читается обратно")
+@Test("saved text reads back")
 func textRoundTrips() throws {
     let repository = try makeRepository()
-    try repository.saveText("привет", source: ("com.apple.TextEdit", "TextEdit"), at: t0)
+    try repository.saveText("hello", source: ("com.apple.TextEdit", "TextEdit"), at: t0)
     let items = try repository.recent(limit: 10)
     #expect(items.count == 1)
-    #expect(items[0].textBody == "привет")
+    #expect(items[0].textBody == "hello")
     #expect(items[0].sourceAppName == "TextEdit")
 }
 
-@Test("повтор поднимает запись наверх, а не создаёт вторую")
+@Test("a repeat promotes the entry to the top instead of creating a duplicate")
 func duplicateIsPromotedNotDuplicated() throws {
     let repository = try makeRepository()
-    try repository.saveText("один", source: ("com.apple.TextEdit", "TextEdit"), at: t0)
-    try repository.saveText("два", source: ("com.apple.TextEdit", "TextEdit"), at: t0.addingTimeInterval(1))
-    try repository.saveText("один", source: ("com.apple.TextEdit", "TextEdit"), at: t0.addingTimeInterval(2))
+    try repository.saveText("one", source: ("com.apple.TextEdit", "TextEdit"), at: t0)
+    try repository.saveText("two", source: ("com.apple.TextEdit", "TextEdit"), at: t0.addingTimeInterval(1))
+    try repository.saveText("one", source: ("com.apple.TextEdit", "TextEdit"), at: t0.addingTimeInterval(2))
 
     let items = try repository.recent(limit: 10)
     #expect(items.count == 2)
-    #expect(items[0].textBody == "один")
+    #expect(items[0].textBody == "one")
 }
 
-@Test("лента отсортирована по последнему использованию")
+@Test("the feed is sorted by last used")
 func recentIsSortedByLastUsed() throws {
     let repository = try makeRepository()
-    try repository.saveText("старое", source: nil, at: t0)
-    try repository.saveText("новое", source: nil, at: t0.addingTimeInterval(60))
-    #expect(try repository.recent(limit: 10).map(\.textBody) == ["новое", "старое"])
+    try repository.saveText("old", source: nil, at: t0)
+    try repository.saveText("new", source: nil, at: t0.addingTimeInterval(60))
+    #expect(try repository.recent(limit: 10).map(\.textBody) == ["new", "old"])
 }
 
-@Test("картинка сохраняется блобом, а не текстом")
+@Test("an image is stored as a blob, not as text")
 func imageIsStoredAsBlob() throws {
     let repository = try makeRepository()
     let bytes = Data(repeating: 3, count: 512)
@@ -54,18 +54,18 @@ func imageIsStoredAsBlob() throws {
     #expect(try repository.data(for: item) == bytes)
 }
 
-@Test("вставленный из истории элемент поднимается наверх ленты")
+@Test("an item pasted from history moves to the top of the feed")
 func touchPromotesItem() throws {
     let repository = try makeRepository()
-    try repository.saveText("старое", source: nil, at: t0)
-    try repository.saveText("новое", source: nil, at: t0.addingTimeInterval(60))
+    try repository.saveText("old", source: nil, at: t0)
+    try repository.saveText("new", source: nil, at: t0.addingTimeInterval(60))
     let old = try #require(try repository.recent(limit: 10).last)
 
     try repository.touch(id: try #require(old.id), at: t0.addingTimeInterval(120))
-    #expect(try repository.recent(limit: 10).map(\.textBody) == ["старое", "новое"])
+    #expect(try repository.recent(limit: 10).map(\.textBody) == ["old", "new"])
 }
 
-@Test("удалённая запись исчезает и из полнотекстового индекса")
+@Test("a deleted entry disappears from the full-text index too")
 func deleteClearsSearchIndex() throws {
     let location = StoreLocation.temporary()
     let database = try NotchDatabase(location: location)
@@ -78,27 +78,27 @@ func deleteClearsSearchIndex() throws {
         }
     }
 
-    try repository.saveText("квитанция об оплате", source: nil, at: t0)
+    try repository.saveText("payment receipt", source: nil, at: t0)
     let item = try #require(try repository.recent(limit: 1).first)
     #expect(try indexedRows() == 1)
 
     try repository.delete(id: try #require(item.id))
-    // Индекс — вторая копия текста на диске. Пользователь, удаливший запись
-    // из истории, вправе рассчитывать, что она исчезла отовсюду, а не
-    // осталась лежать в поисковом индексе.
+    // The index is a second copy of the text on disk. A user who deletes an entry
+    // from history is entitled to expect it disappeared everywhere, not
+    // left sitting in the search index.
     #expect(try indexedRows() == 0)
 }
 
-@Test("закрепление сохраняется")
+@Test("pinning persists")
 func pinningPersists() throws {
     let repository = try makeRepository()
-    try repository.saveText("важное", source: nil, at: t0)
+    try repository.saveText("important", source: nil, at: t0)
     let item = try #require(try repository.recent(limit: 1).first)
     try repository.setPinned(id: item.id!, true)
     #expect(try repository.recent(limit: 1).first?.isPinned == true)
 }
 
-@Test("удаление убирает и запись, и её блоб")
+@Test("deletion removes both the entry and its blob")
 func deleteRemovesBlobToo() throws {
     let repository = try makeRepository()
     try repository.saveImage(Data(repeating: 9, count: 256), source: nil, at: t0)

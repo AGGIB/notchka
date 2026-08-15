@@ -2,11 +2,11 @@ import Foundation
 import CryptoKit
 import os
 
-/// Хранилище картинок и файлов, адресуемое содержимым.
+/// Content-addressed store for images and files.
 ///
-/// Путь выводится из хеша, поэтому дедупликация получается сама собой:
-/// один и тот же скриншот, скопированный дважды, занимает место один раз,
-/// и запись в базе о нём тоже одна.
+/// The path is derived from the hash, so deduplication happens for free:
+/// the same screenshot copied twice takes up space once,
+/// and the database record for it is a single row too.
 public struct BlobStore: Sendable {
     private let location: StoreLocation
     private let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "blobs")
@@ -19,18 +19,18 @@ public struct BlobStore: Sendable {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Сохраняет данные и возвращает относительный путь.
+    /// Stores the data and returns the relative path.
     ///
-    /// `hash` принимается снаружи, потому что вызывающий обычно уже посчитал
-    /// его для строки в базе. SHA-256 мегабайтного скриншота — не бесплатная
-    /// операция, и считать его дважды за одно копирование незачем. Не
-    /// передали — посчитаем сами.
+    /// `hash` is accepted from outside because the caller has usually already
+    /// computed it for the database row. SHA-256 of a megabyte-sized screenshot
+    /// isn't free, and there's no reason to compute it twice for a single copy.
+    /// If it wasn't passed, we compute it ourselves.
     @discardableResult
     public func store(_ data: Data, hash: String? = nil) throws -> String {
         let path = Self.relativePath(for: hash ?? Self.hash(data))
         let url = location.blobsDirectory.appending(path: path)
-        // Файл с таким именем — это ровно эти байты: содержимое и есть имя.
-        // Перезаписывать незачем, и это экономит запись на каждый повтор.
+        // A file with this name is exactly these bytes: the content is the name.
+        // No need to overwrite, and this saves a write on every repeat.
         guard !FileManager.default.fileExists(atPath: url.path) else { return path }
 
         try FileManager.default.createDirectory(
@@ -44,14 +44,14 @@ public struct BlobStore: Sendable {
         try Data(contentsOf: location.blobsDirectory.appending(path: path))
     }
 
-    /// Удаляет блоб. Отсутствие файла — не ошибка: цель вызова достигнута.
+    /// Removes a blob. A missing file is not an error: the goal of the call is achieved.
     ///
-    /// Именно удаление с перехватом, а не проверка существования перед ним.
-    /// Проверка и удаление — две операции, и между ними файл может исчезнуть:
-    /// вытеснение по объёму из RetentionPolicy вполне может совпасть по
-    /// времени с удалением того же блоба вручную. Тогда проверка проходит,
-    /// а удаление бросает — ровно там, где вызывающий вправе рассчитывать
-    /// на тихий отказ.
+    /// This is deletion with a catch, not an existence check before it.
+    /// Checking and deleting are two operations, and the file can disappear between
+    /// them: size-based eviction from RetentionPolicy can easily coincide in time
+    /// with manually removing the same blob. In that case the check passes,
+    /// but the delete throws — exactly where the caller is entitled to expect
+    /// a silent no-op.
     public func remove(at path: String) throws {
         let url = location.blobsDirectory.appending(path: path)
         do {
@@ -61,14 +61,15 @@ public struct BlobStore: Sendable {
         }
     }
 
-    /// Сколько места занято блобами.
+    /// How much space is used by blobs.
     ///
-    /// На этом числе держится бюджет объёма в RetentionPolicy, поэтому ошибка
-    /// обхода каталога обязана оставлять след. Без обработчика перечислитель
-    /// пропускает недоступное поддерево молча, и метод возвращает
-    /// правдоподобное заниженное число: вытеснение не срабатывает вовремя,
-    /// а понять причину не по чему. Обработчик не прерывает обход — лучше
-    /// посчитать остальное и сказать об этом, чем не посчитать ничего.
+    /// The volume budget in RetentionPolicy relies on this number, so a directory
+    /// traversal error must leave a trace. Without a handler the enumerator
+    /// silently skips an inaccessible subtree, and the method returns a
+    /// plausible but understated number: eviction doesn't trigger in time,
+    /// and there's nothing to diagnose the cause from. The handler doesn't
+    /// abort the traversal — better to count the rest and report the issue
+    /// than to count nothing at all.
     public func totalSize() throws -> Int {
         let fm = FileManager.default
         let enumerator = fm.enumerator(
@@ -77,15 +78,15 @@ public struct BlobStore: Sendable {
             options: [],
             errorHandler: { [logger] url, error in
                 logger.error(
-                    "не удалось обойти \(url.lastPathComponent, privacy: .public) при подсчёте блобов: \(error.localizedDescription, privacy: .public)"
+                    "failed to traverse \(url.lastPathComponent, privacy: .public) while counting blobs: \(error.localizedDescription, privacy: .public)"
                 )
                 return true
             }
         )
-        // Отсутствующий каталог блобов даёт не nil, а перечислитель с нулём
-        // итераций, так что ветка ниже на практике не срабатывает. Она нужна
-        // потому, что API возвращает Optional, а не потому, что защищает от
-        // отсутствия каталога.
+        // A missing blobs directory doesn't give nil, but an enumerator with zero
+        // iterations, so the branch below doesn't actually trigger in practice. It's
+        // needed because the API returns an Optional, not because it guards against
+        // the directory being missing.
         guard let enumerator else { return 0 }
 
         var total = 0
@@ -96,8 +97,9 @@ public struct BlobStore: Sendable {
         return total
     }
 
-    /// Первые два символа хеша — подкаталог: тысячи файлов в одной папке
-    /// замедляют файловую систему и делают каталог нечитаемым глазами.
+    /// The first two characters of the hash are the subdirectory: thousands of
+    /// files in one folder slow down the file system and make the directory
+    /// unreadable to the eye.
     private static func relativePath(for hash: String) -> String {
         "\(hash.prefix(2))/\(hash)"
     }

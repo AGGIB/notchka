@@ -5,7 +5,7 @@ import Foundation
 private let t0 = Date(timeIntervalSince1970: 1_000_000)
 private func at(_ offset: TimeInterval) -> Date { t0.addingTimeInterval(offset) }
 
-@Test("проезд мимо чёлки за 100 мс не открывает панель")
+@Test("a 100 ms pass-by over the notch does not open the panel")
 func briefPassByDoesNotTrigger() {
     var debouncer = HoverDebouncer()
     #expect(debouncer.cursorMoved(isInsideHotZone: true, at: at(0)) == nil)
@@ -13,7 +13,7 @@ func briefPassByDoesNotTrigger() {
     #expect(debouncer.tick(at: at(0.500)) == nil)
 }
 
-@Test("задержка 120 мс в зоне открывает панель")
+@Test("a 120 ms dwell inside the zone opens the panel")
 func dwellTriggersEnter() {
     var debouncer = HoverDebouncer()
     debouncer.cursorMoved(isInsideHotZone: true, at: at(0))
@@ -21,7 +21,7 @@ func dwellTriggersEnter() {
     #expect(debouncer.tick(at: at(0.120)) == .cursorEnteredHotZone)
 }
 
-@Test("после входа краткий выход не закрывает панель")
+@Test("after entering, a brief exit does not close the panel")
 func briefExitDoesNotClose() {
     var debouncer = HoverDebouncer()
     debouncer.cursorMoved(isInsideHotZone: true, at: at(0))
@@ -31,7 +31,7 @@ func briefExitDoesNotClose() {
     #expect(debouncer.tick(at: at(1.000)) == nil)
 }
 
-@Test("выход дольше 250 мс закрывает панель")
+@Test("an exit longer than 250 ms closes the panel")
 func sustainedExitTriggersLeave() {
     var debouncer = HoverDebouncer()
     debouncer.cursorMoved(isInsideHotZone: true, at: at(0))
@@ -41,7 +41,7 @@ func sustainedExitTriggersLeave() {
     #expect(debouncer.tick(at: at(0.450)) == .cursorLeftHotZone)
 }
 
-@Test("событие сообщается один раз")
+@Test("the event is reported only once")
 func eventIsReportedOnce() {
     var debouncer = HoverDebouncer()
     debouncer.cursorMoved(isInsideHotZone: true, at: at(0))
@@ -49,7 +49,7 @@ func eventIsReportedOnce() {
     #expect(debouncer.tick(at: at(0.500)) == nil)
 }
 
-@Test("ожидание перехода видно снаружи — по нему включается таймер")
+@Test("the pending transition is observable from outside — it drives the timer")
 func pendingTransitionIsObservable() {
     var debouncer = HoverDebouncer()
     #expect(debouncer.hasPendingTransition == false)

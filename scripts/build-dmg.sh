@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# Собирает Notchka в Release, при наличии сертификата подписывает Developer ID
-# Application-подписью, упаковывает в DMG с фирменным фоном и (опционально)
-# нотаризует готовый образ через notarytool.
+# Builds Notchka in Release configuration, and if a certificate is available, signs it with a Developer ID
+# Application signature, packages it into a DMG with a branded background, and (optionally)
+# notarizes the resulting image via notarytool.
 #
-# Личная подпись и credentials нотаризации никогда не хранятся в репозитории —
-# они передаются через переменные окружения на момент запуска. Без них скрипт
-# соберёт ad-hoc DMG, пригодный для локальной проверки, но не для публичной
-# раздачи (Gatekeeper такую сборку не пропустит без предупреждения).
+# Personal signing identity and notarization credentials are never stored in the repository —
+# they are passed via environment variables at run time. Without them, the script
+# will build an ad-hoc DMG suitable for local testing, but not for public
+# distribution (Gatekeeper will not allow such a build through without a warning).
 #
-# Переменные окружения:
-#   CODE_SIGN_IDENTITY   Полная строка идентичности подписи
-#                        (например "Developer ID Application: Имя (TEAMID)").
-#                        По умолчанию — ad-hoc ("-").
-#   DEVELOPMENT_TEAM     10-символьный Team ID. Обязателен вместе с
-#                        CODE_SIGN_IDENTITY, если она не ad-hoc.
-#   NOTARIZE             "1" — нотаризовать готовый DMG. Требует
+# Environment variables:
+#   CODE_SIGN_IDENTITY   Full code signing identity string
+#                        (e.g. "Developer ID Application: Name (TEAMID)").
+#                        Defaults to ad-hoc ("-").
+#   DEVELOPMENT_TEAM     10-character Team ID. Required together with
+#                        CODE_SIGN_IDENTITY, if it is not ad-hoc.
+#   NOTARIZE             "1" — notarize the resulting DMG. Requires
 #                        NOTARY_KEYCHAIN_PROFILE.
 #   NOTARY_KEYCHAIN_PROFILE
-#                        Имя профиля, заранее сохранённого через
+#                        Name of a profile previously saved via
 #                        `xcrun notarytool store-credentials`.
 #
-# Пример полного публичного релиза:
-#   CODE_SIGN_IDENTITY="Developer ID Application: Имя (TEAMID)" \
+# Example of a full public release:
+#   CODE_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" \
 #   DEVELOPMENT_TEAM=TEAMID \
 #   NOTARIZE=1 NOTARY_KEYCHAIN_PROFILE=notchka-notary \
 #   ./scripts/build-dmg.sh
@@ -37,11 +37,11 @@ NOTARIZE="${NOTARIZE:-0}"
 NOTARY_KEYCHAIN_PROFILE="${NOTARY_KEYCHAIN_PROFILE:-}"
 
 if [[ "$NOTARIZE" == "1" && -z "$NOTARY_KEYCHAIN_PROFILE" ]]; then
-  echo "error: NOTARIZE=1 требует NOTARY_KEYCHAIN_PROFILE" >&2
+  echo "error: NOTARIZE=1 requires NOTARY_KEYCHAIN_PROFILE" >&2
   exit 1
 fi
 if [[ "$CODE_SIGN_IDENTITY" != "-" && -z "$DEVELOPMENT_TEAM" ]]; then
-  echo "error: указана CODE_SIGN_IDENTITY, но не задан DEVELOPMENT_TEAM" >&2
+  echo "error: CODE_SIGN_IDENTITY is set but DEVELOPMENT_TEAM is not" >&2
   exit 1
 fi
 
@@ -56,10 +56,10 @@ VOLUME_NAME="Notchka"
 rm -rf "$STAGING_DIR" "$DMG_TMP" "$DMG_FINAL"
 mkdir -p "$STAGING_DIR"
 
-echo "==> Генерирую Xcode-проект"
+echo "==> Generating Xcode project"
 xcodegen generate
 
-echo "==> Собираю Release (identity: $CODE_SIGN_IDENTITY)"
+echo "==> Building Release (identity: $CODE_SIGN_IDENTITY)"
 xcodebuild \
   -project Notchka.xcodeproj \
   -scheme Notchka \
@@ -71,32 +71,32 @@ xcodebuild \
 
 APP_PATH="$DERIVED_DATA/Build/Products/Release/Notchka.app"
 if [[ ! -d "$APP_PATH" ]]; then
-  echo "error: сборка не создала $APP_PATH" >&2
+  echo "error: build did not produce $APP_PATH" >&2
   exit 1
 fi
 
-echo "==> Проверяю подпись"
+echo "==> Verifying signature"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
-echo "==> Собираю содержимое DMG"
+echo "==> Assembling DMG contents"
 cp -R "$APP_PATH" "$STAGING_DIR/Notchka.app"
 ln -s /Applications "$STAGING_DIR/Applications"
 mkdir -p "$STAGING_DIR/.background"
 cp "$REPO_ROOT/scripts/dmg-assets/dmg-background.png" "$STAGING_DIR/.background/background.png"
 
-echo "==> Создаю временный образ"
+echo "==> Creating temporary image"
 hdiutil create -volname "$VOLUME_NAME" -srcfolder "$STAGING_DIR" -ov -format UDRW -size 200m "$DMG_TMP"
 
 MOUNT_DIR="$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_TMP" | tail -1 | awk '{print $NF}')"
 if [[ -z "$MOUNT_DIR" ]]; then
-  echo "error: не удалось смонтировать временный образ" >&2
+  echo "error: failed to mount temporary image" >&2
   exit 1
 fi
 
-echo "==> Настраиваю оформление окна Finder ($MOUNT_DIR)"
-# Позиции иконок здесь синхронизированы с координатами бейджа и стрелки в
-# scripts/dmg-assets/dmg-background.png (см. IconRenderer/main.swift,
-# функция dmgBackground) — фон рисует подсказку именно под этими точками.
+echo "==> Configuring Finder window appearance ($MOUNT_DIR)"
+# Icon positions here are synced with the badge and arrow coordinates in
+# scripts/dmg-assets/dmg-background.png (see IconRenderer/main.swift,
+# function dmgBackground) — the background draws the hint right under these points.
 osascript <<APPLESCRIPT
 tell application "Finder"
     tell disk "$VOLUME_NAME"
@@ -122,18 +122,18 @@ APPLESCRIPT
 sync
 hdiutil detach "$MOUNT_DIR"
 
-echo "==> Конвертирую в сжатый read-only образ"
+echo "==> Converting to a compressed read-only image"
 hdiutil convert "$DMG_TMP" -format UDZO -imagekey zlib-level=9 -o "$DMG_FINAL"
 rm -f "$DMG_TMP"
 rm -rf "$STAGING_DIR"
 
 if [[ "$NOTARIZE" == "1" ]]; then
-  echo "==> Отправляю на нотаризацию (профиль: $NOTARY_KEYCHAIN_PROFILE)"
+  echo "==> Submitting for notarization (profile: $NOTARY_KEYCHAIN_PROFILE)"
   xcrun notarytool submit "$DMG_FINAL" --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait
-  echo "==> Прикрепляю тикет нотаризации"
+  echo "==> Stapling notarization ticket"
   xcrun stapler staple "$DMG_FINAL"
   xcrun stapler validate "$DMG_FINAL"
 fi
 
-echo "==> Готово: $DMG_FINAL"
+echo "==> Done: $DMG_FINAL"
 shasum -a 256 "$DMG_FINAL"

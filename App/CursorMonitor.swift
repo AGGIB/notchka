@@ -1,18 +1,18 @@
 import AppKit
 
-/// Следит за положением курсора. Глобальный монитор мыши разрешений
-/// не требует — в отличие от монитора клавиатуры.
+/// Tracks the cursor position. The global mouse monitor doesn't require
+/// permissions — unlike the keyboard monitor.
 ///
-/// Таймер запускается только когда есть ожидающий порог: в покое
-/// приложение не должно просыпаться 20 раз в секунду.
+/// The timer only runs when there's a pending threshold: at rest
+/// the app shouldn't wake up 20 times a second.
 @MainActor
 final class CursorMonitor {
     private var monitor: Any?
     private var timer: Timer?
     private var onSample: ((CGPoint, Date) -> Void)?
 
-    /// Шаг опроса, пока ждём истечения порога. 50 мс достаточно:
-    /// самый короткий порог — 120 мс.
+    /// Polling step while waiting for the threshold to elapse. 50 ms is enough:
+    /// the shortest threshold is 120 ms.
     private static let tickInterval: TimeInterval = 0.05
 
     func start(onSample: @escaping (CGPoint, Date) -> Void) {
@@ -24,16 +24,16 @@ final class CursorMonitor {
         }
     }
 
-    /// Включается контроллером, когда у порога есть незавершённый переход.
+    /// Enabled by the controller when the threshold has a pending transition.
     func setTicking(_ isTicking: Bool) {
         guard isTicking != (timer != nil) else { return }
         if isTicking {
-            // Timer.scheduledTimer регистрирует таймер только в режиме .default —
-            // приложение живёт рядом с меню-баром, а там таймер в этом режиме не
-            // тикает во время отслеживания открытого меню (RunLoop.Mode.eventTracking).
-            // Замёрзший на это время курсор никогда не досчитал бы порог наведения.
-            // .common объединяет оба режима, поэтому таймер создаётся вручную и
-            // добавляется в текущий run loop, а не через scheduledTimer.
+            // Timer.scheduledTimer registers the timer only in .default mode —
+            // this app lives next to the menu bar, and in that mode the timer
+            // doesn't tick while an open menu is being tracked (RunLoop.Mode.eventTracking).
+            // A cursor frozen for that duration would never reach the hover threshold.
+            // .common combines both modes, so the timer is created manually and
+            // added to the current run loop instead of via scheduledTimer.
             let timer = Timer(timeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.emit() }
             }
@@ -52,7 +52,7 @@ final class CursorMonitor {
     }
 
     deinit {
-        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit.
+        // Same trick and same rationale as in HotkeyCenter.deinit.
         MainActor.assumeIsolated { stop() }
     }
 

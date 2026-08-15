@@ -1,11 +1,12 @@
 import Foundation
 
-/// Сколько истории хранить.
+/// How much history to keep.
 ///
-/// Три независимых предела, а не один: количество бережёт скорость ленты,
-/// возраст — приватность (скопированное полгода назад пользователь давно
-/// забыл), объём — диск, потому что один скриншот весит как тысяча строк
-/// текста. Срабатывает тот, до которого дошли первым.
+/// Three independent limits, not one: count protects feed speed,
+/// age protects privacy (something copied six months ago the user has
+/// long forgotten), and size protects disk space, since one screenshot
+/// weighs as much as a thousand lines of text. Whichever limit is hit
+/// first wins.
 public struct RetentionPolicy: Sendable, Equatable {
     public let maxItems: Int
     public let maxAge: TimeInterval

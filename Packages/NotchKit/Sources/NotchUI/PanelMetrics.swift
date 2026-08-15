@@ -1,43 +1,43 @@
 import CoreGraphics
 import NotchCore
 
-/// Размеры панели по состояниям.
+/// Panel sizes by state.
 ///
-/// Собраны в одном месте, потому что от них зависят три вещи сразу: рисование
-/// фигуры, размер окна и проверка попадания курсора в раскрытую панель.
-/// Разъехавшись, они дали бы панель, закрывающуюся под курсором.
+/// Gathered in one place because three things depend on them at once: drawing
+/// the shape, the window size, and hit-testing the cursor against the expanded
+/// panel. If they drifted apart, they'd produce a panel that closes under the cursor.
 public enum PanelMetrics {
-    /// Окно постоянного размера, в котором живёт всё остальное.
+    /// Fixed-size window that everything else lives inside.
     public static let windowSize = CGSize(width: 680, height: 300)
     public static let concaveRadius: CGFloat = 8
 
     public static let peekPadding = CGSize(width: 120, height: 28)
     public static let expandedSize = CGSize(width: 620, height: 264)
 
-    /// Поля по бокам, суммарно.
+    /// Side insets, combined.
     public static let horizontalInset: CGFloat = 26
-    /// Просвет между нижним краем физического выреза и содержимым.
+    /// Gap between the bottom edge of the physical notch and the content.
     public static let notchGap: CGFloat = 6
-    /// Поле снизу.
+    /// Bottom inset.
     public static let bottomInset: CGFloat = 14
 
-    /// Высота выреза для тестов и прикидок. В рантайме берётся настоящая,
-    /// измеренная по `safeAreaInsets.top` экрана: у нынешних MacBook это
-    /// 32 pt, но зашивать это числом нельзя — панель обязана считаться от
-    /// того выреза, который на самом деле есть.
+    /// Notch height for tests and estimates. At runtime the real value is
+    /// used, measured from the screen's `safeAreaInsets.top`: on current
+    /// MacBooks that's 32 pt, but it can't be hardcoded — the panel must be
+    /// computed from whatever notch actually exists.
     public static let referenceNotchHeight: CGFloat = 32
 
-    /// Сколько панель отъедает у содержимого при вырезе высотой `notchHeight`.
+    /// How much the panel eats into the content for a notch of height `notchHeight`.
     ///
-    /// Верхний отступ выводится из настоящей высоты выреза, а не из
-    /// константы: раньше он был зашит числом 24 при вырезе в 32 pt, и чёлка
-    /// накрывала верх обложки и название трека. Считать содержимое от
-    /// физического выреза — единственный способ не наступить на это снова.
+    /// The top inset is derived from the real notch height, not from a
+    /// constant: it used to be hardcoded as 24 for a 32 pt notch, and the
+    /// notch covered the top of the artwork and the track title. Computing
+    /// content from the physical notch is the only way to avoid repeating that.
     public static func contentInsets(notchHeight: CGFloat) -> CGSize {
         CGSize(width: horizontalInset, height: notchHeight + notchGap + bottomInset)
     }
 
-    /// Место, остающееся содержимому вкладки в раскрытой панели.
+    /// Space left for tab content in the expanded panel.
     public static func contentSize(notchHeight: CGFloat) -> CGSize {
         let insets = contentInsets(notchHeight: notchHeight)
         return CGSize(

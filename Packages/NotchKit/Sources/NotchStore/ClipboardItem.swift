@@ -5,11 +5,11 @@ public enum ClipboardKind: String, Codable, Sendable {
     case text, image, file
 }
 
-/// Запись истории буфера.
+/// Clipboard history entry.
 ///
-/// Текст лежит прямо в строке, а картинки и файлы — блобом на диске:
-/// класть мегабайтные скриншоты в SQLite значит раздувать базу и замедлять
-/// любой запрос к ленте.
+/// Text lives directly in the row, while images and files are stored as a blob on disk:
+/// putting megabyte-sized screenshots into SQLite would bloat the database and slow down
+/// every query against the feed.
 public struct ClipboardItem: Codable, Sendable, FetchableRecord, MutablePersistableRecord {
     public static let databaseTableName = "clipboard_items"
 

@@ -1,10 +1,11 @@
 import Foundation
 
-/// Состояние текущего воспроизведения на момент последнего события адаптера.
+/// Playback state as of the adapter's last event.
 ///
-/// `elapsedTime` и `timestamp` намеренно хранятся парой: адаптер отдаёт их
-/// как снимок и между событиями не обновляет, поэтому позиция без метки
-/// времени бессмысленна. Живой расчёт — в `PlaybackPosition`.
+/// `elapsedTime` and `timestamp` are intentionally stored as a pair: the
+/// adapter hands them over as a snapshot and doesn't update them between
+/// events, so a position without a timestamp is meaningless. Live
+/// calculation lives in `PlaybackPosition`.
 public struct NowPlayingSnapshot: Sendable, Equatable {
     public var title: String
     public var artist: String
@@ -14,20 +15,20 @@ public struct NowPlayingSnapshot: Sendable, Equatable {
     public var timestamp: Date
     public var playbackRate: Double
     public var isPlaying: Bool
-    /// Bundle id приложения-источника: по нему UI показывает, откуда играет.
-    /// Для источников, рендерящих медиа в отдельном вспомогательном
-    /// процессе (см. `parentApplicationBundleID`), это bundle id именно
-    /// помощника, а не самого приложения — таким его отдаёт MediaRemote.
+    /// Bundle id of the source app: the UI uses it to show where playback
+    /// is coming from. For sources that render media in a separate helper
+    /// process (see `parentApplicationBundleID`), this is the bundle id of
+    /// the helper itself, not the app — that's how MediaRemote reports it.
     public var sourceBundleID: String
     public var artworkData: Data?
     public var artworkMimeType: String?
-    /// Bundle id родительского приложения, если `sourceBundleID` — это
-    /// вспомогательный процесс. Находка Task 4: Safari рендерит медиа в
-    /// процессе `com.apple.WebKit.GPU`, и только это поле указывает на
-    /// `com.apple.Safari` — само приложение, которое стоит показывать
-    /// пользователю. nil значит, что адаптер не прислал родителя: либо
-    /// sourceBundleID уже и есть настоящее приложение, либо адаптер не
-    /// распознал в источнике чей-то вспомогательный процесс.
+    /// Bundle id of the parent application, if `sourceBundleID` is a
+    /// helper process. Task 4 finding: Safari renders media in the
+    /// `com.apple.WebKit.GPU` process, and only this field points to
+    /// `com.apple.Safari` — the actual app that should be shown to the
+    /// user. nil means the adapter didn't supply a parent: either
+    /// sourceBundleID is already the real app, or the adapter didn't
+    /// recognize the source as someone's helper process.
     public var parentApplicationBundleID: String?
 
     public init(

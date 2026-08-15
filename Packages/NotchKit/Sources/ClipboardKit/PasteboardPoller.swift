@@ -1,15 +1,15 @@
 import Foundation
 
-/// Решает, надо ли читать пастборд.
+/// Decides whether the pasteboard needs to be read.
 ///
-/// Публичного уведомления об изменении пастборда в macOS нет — остаётся
-/// опрос счётчика. Логика «читать или нет» отделена от `NSPasteboard`,
-/// чтобы проверяться без него: подделать `changeCount` живой системы
-/// в тесте нельзя.
+/// macOS has no public notification for pasteboard changes — polling
+/// the change count is what's left. The "read or not" logic is kept
+/// separate from `NSPasteboard` so it can be tested without one: you
+/// can't fake a live system's `changeCount` in a test.
 public struct PasteboardPoller: Sendable {
-    /// Чаще нет смысла: человек не копирует по пять раз в секунду.
+    /// No point going faster: nobody copies five times a second.
     public static let interval: TimeInterval = 0.4
-    /// Неактивный пользователь ничего не копирует — незачем будить процесс.
+    /// An idle user isn't copying anything — no reason to wake the process.
     public static let idleThreshold: TimeInterval = 60
 
     private var lastSeenCount: Int?
@@ -18,22 +18,24 @@ public struct PasteboardPoller: Sendable {
 
     public mutating func shouldRead(changeCount: Int, idleSeconds: TimeInterval) -> Bool {
         guard idleSeconds < Self.idleThreshold else { return false }
-        // Счётчик не запоминаем, пока пользователь неактивен: иначе
-        // скопированное во время его отсутствия потерялось бы навсегда.
+        // Don't remember the count while the user is idle: otherwise
+        // anything copied during their absence would be lost forever.
         guard lastSeenCount != changeCount else { return false }
         lastSeenCount = changeCount
         return true
     }
 
-    /// Помечает изменение как своё — читать его не надо.
+    /// Marks a change as our own — no need to read it.
     ///
-    /// Приложение само пишет в пастборд, когда пользователь достаёт что-то
-    /// из истории. Без этой отметки опрос через доли секунды прочитает
-    /// собственную запись и заведёт вторую запись о том же. Для текста это
-    /// сходило бы с рук: побайтово он тот же, и дедупликация по хешу просто
-    /// подняла бы существующую строку. Но картинка возвращается с пастборда
-    /// в другом представлении и с другим размером — хеш не совпадает, и в
-    /// истории появляется дубль, вдобавок заметно тяжелее оригинала.
+    /// The app writes to the pasteboard itself when the user pulls
+    /// something out of history. Without this marker, polling a fraction
+    /// of a second later would read back its own write and create a
+    /// second entry for the same thing. For text this would be harmless:
+    /// byte-for-byte it's the same, and hash-based dedup would just bump
+    /// the existing entry. But an image comes back from the pasteboard in
+    /// a different representation and a different size — the hash doesn't
+    /// match, and a duplicate shows up in history, noticeably heavier than
+    /// the original.
     public mutating func ignore(changeCount: Int) {
         lastSeenCount = changeCount
     }

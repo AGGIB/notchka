@@ -1,22 +1,23 @@
-/// Команда управления воспроизведением.
+/// Playback control command.
 ///
-/// Коды подтверждены эмпирически, а не взяты из заголовка фреймворка — но
-/// не одним и тем же сеансом проверки. `play`/`pause`/`toggle` — из
-/// исходного спайка: `play` и `pause` идемпотентны, `toggle` инвертирует
-/// состояние на каждый вызов. `next`/`previous` подтверждены отдельно и
-/// позже, отправкой команд играющему в Safari YouTube-видео: в обоих
-/// случаях трек реально сменился, в соответствующую сторону. Метод тот же
-/// самый — эмпирика, не документация и не чтение заголовка, — а сеанс
-/// другой, и проверка шла на одном источнике. Поведение «предыдущего» на
-/// разных плеерах различается (там, где трека до текущего нет, он обычно
-/// перематывает в начало), но это уже свойство самих плееров, а не кода.
+/// The codes were confirmed empirically, not taken from a framework header —
+/// but not in one and the same verification session. `play`/`pause`/`toggle` are
+/// from the original spike: `play` and `pause` are idempotent, `toggle` inverts
+/// the state on every call. `next`/`previous` were confirmed separately and
+/// later, by sending commands to a YouTube video playing in Safari: in both
+/// cases the track actually changed, in the matching direction. The method is
+/// the same — empirical, not documentation or header-reading — but the
+/// session was different, and verification only covered one source.
+/// "Previous" behavior differs across players (where there's no track before
+/// the current one, it usually rewinds to the start), but that's a property
+/// of the players themselves, not of this code.
 ///
-/// Отсутствие именно такой проверки в своё время и привело к дефекту:
-/// кнопки next/previous в интерфейсе слали код `toggle` вместо настоящих
-/// next/previous, которых тогда никто не подтвердил, и нажатие «следующий
-/// трек» на деле останавливало музыку. Из-за этого кнопки временно убирали
-/// из интерфейса целиком — до появления вот этой проверки (см. doc
-/// PlayPauseButton в MusicTabView).
+/// The lack of exactly this kind of verification once caused a bug: the
+/// next/previous buttons in the UI sent the `toggle` code instead of real
+/// next/previous, which nobody had confirmed at the time, and pressing "next
+/// track" would actually stop the music. Because of this, the buttons were
+/// temporarily removed from the UI entirely — until this verification landed
+/// (see the PlayPauseButton doc in MusicTabView).
 public enum MediaCommand: Sendable, Equatable {
     case play
     case pause

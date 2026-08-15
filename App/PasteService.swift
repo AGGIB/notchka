@@ -2,11 +2,11 @@ import AppKit
 import CoreGraphics
 import os
 
-/// Кладёт текст в пастборд и вставляет его в активное приложение.
+/// Puts text on the pasteboard and pastes it into the active application.
 ///
-/// Оригинал пастборда сознательно не восстанавливается: восстановление
-/// через задержку ломает приложения, читающие буфер асинхронно, и даёт
-/// гонки, которые пользователь увидит как «вставилось не то».
+/// The original pasteboard contents are deliberately not restored: restoring
+/// after a delay breaks apps that read the buffer asynchronously, and causes
+/// races the user would see as "the wrong thing got pasted."
 @MainActor
 enum PasteService {
     private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "paste")
@@ -17,25 +17,25 @@ enum PasteService {
         pasteboard.setString(text, forType: .string)
     }
 
-    /// То же для не-текстового содержимого: картинки, ссылки на файл.
+    /// Same idea for non-text content: images, file references.
     ///
-    /// Отдельный вход, потому что байты картинки нельзя положить строкой, а
-    /// «клик вставляет» обещано всем типам истории, не только тексту.
+    /// A separate entry point because image bytes can't be put on as a
+    /// string, and "click to paste" is promised for every history item type, not just text.
     static func copyOnly(objects: [any NSPasteboardWriting]) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.writeObjects(objects)
     }
 
-    /// Возвращает false, если нет разрешения: вызывающий показывает подсказку.
+    /// Returns false if permission is missing: the caller shows a hint.
     @discardableResult
     static func paste(_ text: String, into application: NSRunningApplication?) -> Bool {
         copyOnly(text)
         return pasteWhatIsOnPasteboard(into: application)
     }
 
-    /// Вставка не-текстового содержимого. Механика ниже общая с текстом:
-    /// ⌘V не разбирается, что именно лежит в пастборде.
+    /// Pastes non-text content. The mechanics below are shared with text:
+    /// ⌘V doesn't care what's actually on the pasteboard.
     @discardableResult
     static func paste(objects: [any NSPasteboardWriting], into application: NSRunningApplication?) -> Bool {
         copyOnly(objects: objects)
@@ -44,12 +44,12 @@ enum PasteService {
 
     private static func pasteWhatIsOnPasteboard(into application: NSRunningApplication?) -> Bool {
         guard AccessibilityPermission.isTrusted else {
-            logger.notice("вставка невозможна: нет разрешения Accessibility, содержимое только скопировано")
+            logger.notice("paste unavailable: no Accessibility permission, content only copied")
             return false
         }
 
-        // Фокус возвращается тому приложению, у которого его забрала
-        // раскрытая панель, иначе ⌘V уйдёт в пустоту.
+        // Focus is returned to the application it was taken from by the
+        // expanded panel, otherwise ⌘V would go nowhere.
         application?.activate()
         postCommandV()
         return true
@@ -62,7 +62,7 @@ enum PasteService {
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
         else {
-            logger.error("не удалось создать событие ⌘V")
+            logger.error("failed to create ⌘V event")
             return
         }
         down.flags = .maskCommand

@@ -1,9 +1,9 @@
 import Foundation
 import GRDB
 
-/// Закреплённый сниппет: почта, номер карты, ИИН и подобное — то, что
-/// пользователь держит под рукой в панели вместо того, чтобы каждый раз
-/// искать и копировать заново.
+/// A pinned snippet: email, card number, national ID and the like — things
+/// the user keeps at hand in the panel instead of having to search and
+/// copy them again every time.
 public struct Snippet: Codable, Sendable, FetchableRecord, MutablePersistableRecord {
     public static let databaseTableName = "snippets"
 
@@ -30,10 +30,11 @@ public struct Snippet: Codable, Sendable, FetchableRecord, MutablePersistableRec
 }
 
 extension Snippet {
-    /// Маска фиксированной длины.
+    /// Fixed-length mask.
     ///
-    /// Длина настоящего значения — сама по себе подсказка: по числу точек
-    /// ИИН отличим от номера карты. Поэтому маска не зависит от значения.
+    /// The length of the real value is itself a hint: dot count alone
+    /// tells a national ID apart from a card number. That's why the mask
+    /// doesn't depend on the value.
     public static func masked(_ value: String) -> String {
         "••• ••• •••"
     }

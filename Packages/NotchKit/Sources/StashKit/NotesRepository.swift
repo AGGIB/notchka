@@ -2,31 +2,31 @@ import Foundation
 import GRDB
 import NotchStore
 
-/// Доступ к репозиторию быстрых заметок.
+/// Access to the quick notes repository.
 public struct NotesRepository: Sendable {
     private let database: NotchDatabase
 
-    // Тип владельца в общем search_index. Константа, а не литерал в трёх
-    // местах: опечатка в одном из них тихо ломает поиск, а компилятор
-    // такое не ловит — только рантайм-несовпадение строк.
+    // Owner kind in the shared search_index. A constant, not a literal in three
+    // places: a typo in one of them silently breaks search, and the compiler
+    // won't catch it — only a runtime string mismatch.
     private static let ownerKind = "note"
 
     public init(database: NotchDatabase) {
         self.database = database
     }
 
-    /// Заметка не сохранилась, потому что после отсечения пробелов и
-    /// переводов строк от неё ничего не осталось.
+    /// The note wasn't saved because nothing was left of it after trimming
+    /// whitespace and newlines.
     public struct EmptyBodyError: Error, Sendable {}
 
-    /// Сохраняет заметку. После отсечения пробелов и переводов строк пустая
-    /// заметка не сохраняется, а бросает — иначе случайный ⌘↩ без текста
-    /// молча ничего не делал бы, и вызывающий код не смог бы отличить
-    /// «сохранено» от «отклонено», чтобы, например, не очищать поле ввода.
+    /// Saves a note. After trimming whitespace and newlines, an empty
+    /// note is not saved but throws instead — otherwise a stray ⌘↩ with no
+    /// text would silently do nothing, and the caller couldn't tell
+    /// "saved" from "rejected" to, say, avoid clearing the input field.
     ///
-    /// Строка поискового индекса пишется в той же транзакции, что и сама
-    /// заметка: без этого сбой между двумя вставками мог бы оставить
-    /// сохранённую заметку без записи в индексе, и поиск бы её не находил.
+    /// The search index row is written in the same transaction as the
+    /// note itself: without this, a failure between the two inserts could
+    /// leave a saved note without an index entry, and search wouldn't find it.
     public func add(_ body: String, at now: Date = Date()) throws {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw EmptyBodyError() }
@@ -35,11 +35,11 @@ public struct NotesRepository: Sendable {
             var note = Note(id: nil, body: trimmed, createdAt: now, updatedAt: now)
             try note.insert(db)
             guard let id = note.id else {
-                // GRDB всегда проставляет id в didInsert после успешной
-                // автоинкрементной вставки — это недостижимо на практике.
-                // Но throw здесь, а не return: return означал бы COMMIT
-                // заметки без строки индекса, и разошедшееся состояние
-                // осталось бы в базе навсегда, а не только на время вызова.
+                // GRDB always sets id in didInsert after a successful
+                // auto-increment insert — this is unreachable in practice.
+                // But throw here, not return: return would mean COMMITting
+                // the note without an index row, and the diverged state
+                // would remain in the database forever, not just for the call's duration.
                 struct MissingInsertedID: Error, Sendable {}
                 throw MissingInsertedID()
             }
@@ -50,26 +50,27 @@ public struct NotesRepository: Sendable {
         }
     }
 
-    /// Все заметки, самые новые сверху. Сортировка — по времени создания,
-    /// а не правки: правка не должна двигать заметку в ленте.
+    /// All notes, newest first. Sorted by creation time,
+    /// not modification time: editing shouldn't move a note in the feed.
     public func all() throws -> [Note] {
         try database.queue.read { db in
             try Note.order(Column("created_at").desc).fetchAll(db)
         }
     }
 
-    /// Меняет текст и время правки. Время создания не трогается: иначе
-    /// исправление опечатки переносило бы заметку в начало ленты, а
-    /// пользователь ждёт, что она останется там, где была.
+    /// Updates the text and the modification time. The creation time is not
+    /// touched: otherwise fixing a typo would move the note to the top of
+    /// the feed, and the user expects it to stay where it was.
     ///
-    /// Пустая после отсечения пробелов правка отклоняется тем же правилом
-    /// и тем же способом, что и пустое создание — throw, а не тихий return,
-    /// иначе стёршему весь текст пользователю нечем сказать, что правка не
-    /// применилась, и старое содержимое просто беззвучно осталось на месте.
+    /// An edit that's empty after trimming whitespace is rejected by the
+    /// same rule and the same way as an empty creation — throw, not a
+    /// silent return, otherwise a user who erased all the text would have
+    /// no way to know the edit didn't apply, and the old content would
+    /// just silently stay in place.
     ///
-    /// Строка индекса обновляется в той же транзакции, что и заметка, —
-    /// как при создании и удалении, чтобы поиск не отставал от текста
-    /// заметки при сбое между двумя операциями.
+    /// The index row is updated in the same transaction as the note —
+    /// same as on creation and deletion, so search doesn't fall behind
+    /// the note's text if there's a failure between the two operations.
     public func update(id: Int64, body: String, at now: Date = Date()) throws {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw EmptyBodyError() }
@@ -86,9 +87,9 @@ public struct NotesRepository: Sendable {
         }
     }
 
-    /// Удаляет заметку вместе со строкой индекса в одной транзакции —
-    /// иначе после сбоя между операциями поиск мог бы найти уже удалённую
-    /// заметку.
+    /// Deletes a note together with its index row in a single transaction —
+    /// otherwise, after a failure between operations, search could find an
+    /// already-deleted note.
     public func delete(id: Int64) throws {
         try database.queue.write { db in
             try db.execute(sql: "DELETE FROM notes WHERE id = ?", arguments: [id])

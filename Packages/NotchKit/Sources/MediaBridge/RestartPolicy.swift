@@ -1,10 +1,10 @@
 import Foundation
 
-/// Нарастающие паузы между попытками поднять адаптер.
+/// Growing pauses between attempts to bring the adapter back up.
 ///
-/// Потолок в 30 секунд выбран так, чтобы упавший навсегда адаптер не жёг
-/// батарею перезапусками, но и не заставлял ждать минутами после того, как
-/// причина отказа ушла.
+/// The 30-second cap is chosen so that a permanently failed adapter doesn't
+/// drain the battery with restarts, but also doesn't force waiting minutes
+/// after the cause of the failure is gone.
 public struct RestartPolicy: Sendable {
     public static let initialDelay: TimeInterval = 1
     public static let maxDelay: TimeInterval = 30
@@ -19,8 +19,8 @@ public struct RestartPolicy: Sendable {
         return delay
     }
 
-    /// Вызывается, когда поток снова заработал: следующий отказ начнёт
-    /// отсчёт заново, а не продолжит с накопленного потолка.
+    /// Called when the stream starts working again: the next failure will
+    /// restart the count from zero instead of continuing from the accumulated cap.
     public mutating func reset() {
         attempt = 0
     }

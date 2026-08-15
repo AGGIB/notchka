@@ -1,14 +1,14 @@
 import SwiftUI
 import NotchCore
 
-/// Оболочка панели: чёрная фигура, морф между состояниями, колонка
-/// переключения вкладок слева и место под содержимое справа.
+/// Panel shell: the black shape, the morph between states, a tab-switching
+/// column on the left, and a slot for content on the right.
 ///
-/// Содержимое приходит замыканием, а не зашито внутрь: что именно рисует
-/// каждая вкладка, оболочка не знает. Колонку вкладок оболочка, наоборот,
-/// рисует сама — переключение (её единственная обязанность, не связанная с
-/// конкретным содержимым) не должно зависеть от того, какие вкладки уже
-/// подключены к данным, а какие ещё нет.
+/// Content arrives as a closure rather than being baked in: the shell
+/// doesn't know what each tab actually draws. The tab column, by contrast,
+/// the shell draws itself — switching (its one responsibility, unrelated to
+/// any specific content) shouldn't depend on which tabs are already wired
+/// to data and which aren't yet.
 public struct NotchPanelView<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -18,11 +18,11 @@ public struct NotchPanelView<Content: View>: View {
     private let onSelectTab: (NotchTab) -> Void
     private let content: (NotchTab) -> Content
 
-    /// Промежуток между колонкой вкладок и содержимым.
+    /// Gap between the tab column and the content.
     ///
-    /// Вычисляемое, а не хранимое свойство: NotchPanelView — generic-тип
-    /// (по Content), а хранимые static-свойства в generic-типах Swift не
-    /// поддерживает (у каждой специализации была бы своя копия хранилища).
+    /// Computed, not stored: NotchPanelView is a generic type
+    /// (over Content), and Swift doesn't support stored static properties
+    /// in generic types (each specialization would get its own copy of storage).
     private static var contentGap: CGFloat { 16 }
 
     public init(
@@ -50,22 +50,22 @@ public struct NotchPanelView<Content: View>: View {
         )
         .fill(.black)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // Свечение только у раскрытой панели: в покое и в peek она по размеру
-        // близка к вырезу, и ореол вокруг чёрного на чёрном выдавал бы
-        // границу панели там, где её быть не должно.
+        // Glow only for the expanded panel: at rest and in peek it's close
+        // in size to the notch, and a halo around black-on-black would give
+        // away the panel edge where it shouldn't be visible.
         .shadow(color: glowColor, radius: glowRadius, y: 6)
         .overlay(alignment: .top) { tabBody(in: size) }
         .animation(NotchMotion.animation(for: state, reduceMotion: reduceMotion), value: state)
         .animation(NotchMotion.accentFade, value: accent)
     }
 
-    /// Цвет ореола. Прозрачный во всех состояниях, кроме раскрытого.
+    /// Glow color. Transparent in every state except expanded.
     private var glowColor: Color {
         if case .expanded = state { accent.opacity(0.28) } else { .clear }
     }
 
-    /// Радиус ореола. Ноль вне раскрытого состояния, чтобы SwiftUI не тратил
-    /// проход размытия там, где цвет всё равно прозрачный.
+    /// Glow radius. Zero outside the expanded state, so SwiftUI doesn't spend
+    /// a blur pass where the color is transparent anyway.
     private var glowRadius: CGFloat {
         if case .expanded = state { 12 } else { 0 }
     }
@@ -82,14 +82,14 @@ public struct NotchPanelView<Content: View>: View {
                 width: size.width - PanelMetrics.contentInsets(notchHeight: notchSize.height).width,
                 height: size.height - PanelMetrics.contentInsets(notchHeight: notchSize.height).height
             )
-            // Отступ сверху равен настоящей высоте выреза плюс просвет, а не
-            // константе: вырез на этой машине 32 pt, а отступ был 24 — чёлка
-            // накрывала верх обложки и название трека.
+            // Top padding equals the notch's actual height plus a gap, not
+            // a constant: the notch on this machine is 32 pt, and the padding
+            // was 24 — the notch covered the top of the artwork and track title.
             .padding(.top, notchSize.height + PanelMetrics.notchGap)
-            // Морф формы и проявление содержимого — разные вещи. При
-            // Reduce Motion форма меняется мгновенно, и переход целиком
-            // отдаётся прозрачности: это вторая половина требования
-            // спеки, ради которой в плане 1 написана usesMorph.
+            // Shape morph and content reveal are different things. Under
+            // Reduce Motion the shape changes instantly, and the transition
+            // is handed entirely to opacity: this is the second half of the
+            // spec requirement that usesMorph in plan 1 was written for.
             .transition(
                 NotchMotion.usesMorph(reduceMotion: reduceMotion)
                     ? AnyTransition(.blurReplace).combined(with: .opacity)

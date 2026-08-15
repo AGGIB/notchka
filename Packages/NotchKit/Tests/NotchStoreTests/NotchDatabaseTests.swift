@@ -3,12 +3,12 @@ import Foundation
 import GRDB
 @testable import NotchStore
 
-/// Проверки самой схемы, а не работающего поверх неё репозитория.
+/// Checks of the schema itself, not the repository built on top of it.
 ///
-/// Существуют потому, что два свойства схемы держатся на решениях, которые
-/// легко откатить по невнимательности, и откат не даст ни ошибки сборки, ни
-/// исключения во время работы. Испорченная миграция обходится дороже обычной
-/// ошибки: у пользователя уже созданная база не переедет.
+/// They exist because two properties of the schema rest on decisions that
+/// are easy to revert by accident, and reverting them won't produce a build
+/// error or a runtime exception. A broken migration costs more than an
+/// ordinary bug: a user's already-created database won't carry over.
 
 private func makeDatabase() throws -> NotchDatabase {
     let database = try NotchDatabase(location: .temporary())
@@ -16,7 +16,7 @@ private func makeDatabase() throws -> NotchDatabase {
     return database
 }
 
-@Test("повторная миграция не ломает уже мигрированную базу")
+@Test("re-running the migration does not break an already-migrated database")
 func migrationIsIdempotent() throws {
     let database = try makeDatabase()
     try database.migrate()
@@ -30,22 +30,22 @@ func migrationIsIdempotent() throws {
     #expect(tableCount == 1)
 }
 
-/// Главная защита этого файла.
+/// The main protection this file provides.
 ///
-/// Полнотекстовая таблица создана обычной, а не contentless — намеренно.
-/// Contentless выглядит экономнее и её легко «оптимизировать» обратно, но
-/// она не хранит значений колонок: чтение вернуло бы пустые строки, а
-/// удаление по владельцу перестало бы находить хоть что-нибудь. Причём
-/// молча — DELETE на contentless не падает, он просто ничего не удаляет,
-/// и тексты, удалённые пользователем из истории, продолжали бы лежать
-/// в индексе.
-@Test("значения колонок индекса читаются обратно — таблица не contentless")
+/// The full-text table is created as a regular table, not contentless —
+/// intentionally. Contentless looks cheaper and is easy to "optimize" back
+/// to, but it doesn't store column values: reads would come back as empty
+/// strings, and deleting by owner would stop finding anything at all. And
+/// silently — DELETE on a contentless table doesn't fail, it just deletes
+/// nothing, and text the user deleted from history would keep sitting
+/// in the index.
+@Test("index column values read back correctly — table is not contentless")
 func searchIndexStoresItsColumns() throws {
     let database = try makeDatabase()
     try database.queue.write { db in
         try db.execute(
             sql: "INSERT INTO search_index (owner_kind, owner_id, title, body) VALUES (?, ?, ?, ?)",
-            arguments: ["clipboard", 1, "TextEdit", "привет мир"]
+            arguments: ["clipboard", 1, "TextEdit", "hello world"]
         )
     }
 
@@ -55,14 +55,14 @@ func searchIndexStoresItsColumns() throws {
     #expect(owner == "clipboard")
 }
 
-@Test("удаление по владельцу убирает ровно свою строку индекса")
+@Test("deleting by owner removes exactly its own index row")
 func searchIndexRowsAreDeletableByOwner() throws {
     let database = try makeDatabase()
     try database.queue.write { db in
         for id in 1...2 {
             try db.execute(
                 sql: "INSERT INTO search_index (owner_kind, owner_id, title, body) VALUES (?, ?, ?, ?)",
-                arguments: ["clipboard", id, "источник", "тело \(id)"]
+                arguments: ["clipboard", id, "source", "body \(id)"]
             )
         }
         try db.execute(
@@ -77,25 +77,25 @@ func searchIndexRowsAreDeletableByOwner() throws {
     #expect(survivors == [2])
 }
 
-@Test("текст остаётся находимым через полнотекстовый поиск")
+@Test("text remains findable via full-text search")
 func searchIndexIsQueryable() throws {
     let database = try makeDatabase()
     try database.queue.write { db in
         try db.execute(
             sql: "INSERT INTO search_index (owner_kind, owner_id, title, body) VALUES (?, ?, ?, ?)",
-            arguments: ["clipboard", 7, "TextEdit", "квитанция об оплате"]
+            arguments: ["clipboard", 7, "TextEdit", "payment receipt"]
         )
     }
 
     let found = try database.queue.read { db in
-        try Int.fetchOne(db, sql: "SELECT owner_id FROM search_index WHERE search_index MATCH 'квитанция'")
+        try Int.fetchOne(db, sql: "SELECT owner_id FROM search_index WHERE search_index MATCH 'receipt'")
     }
     #expect(found == 7)
 }
 
-/// На этой уникальности держится дедупликация: повторно скопированный текст
-/// обязан поднять существующую запись, а не завести вторую.
-@Test("повторный content_hash отвергается самой базой")
+/// Deduplication depends on this uniqueness: a re-copied text is supposed
+/// to bump the existing record, not create a second one.
+@Test("a duplicate content_hash is rejected by the database itself")
 func contentHashIsUnique() throws {
     let database = try makeDatabase()
     let insert = """
@@ -106,12 +106,12 @@ func contentHashIsUnique() throws {
     let now = Date(timeIntervalSince1970: 1_000_000)
 
     try database.queue.write { db in
-        try db.execute(sql: insert, arguments: ["text", "одинаковый", "первый", 6, now, now, false])
+        try db.execute(sql: insert, arguments: ["text", "identical", "first", 6, now, now, false])
     }
 
     #expect(throws: (any Error).self) {
         try database.queue.write { db in
-            try db.execute(sql: insert, arguments: ["text", "одинаковый", "второй", 6, now, now, false])
+            try db.execute(sql: insert, arguments: ["text", "identical", "second", 6, now, now, false])
         }
     }
 }

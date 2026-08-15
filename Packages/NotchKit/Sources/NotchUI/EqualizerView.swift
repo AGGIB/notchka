@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Декоративный эквалайзер.
+/// Decorative equalizer.
 ///
-/// Настоящий спектр чужого приложения без виртуального аудиодрайвера
-/// недоступен — ограничение зафиксировано в спеке §7. Полоски реагируют на
-/// факт воспроизведения, а не на звук, и это осознанно.
+/// The real spectrum of another app's audio is unavailable without a virtual
+/// audio driver — the limitation is documented in spec §7. The bars react to
+/// the fact of playback, not the sound itself, and that's intentional.
 ///
-/// `paused: !isAnimating` в TimelineView обязателен: без него таймлайн
-/// продолжает будить рендер на паузе, а спека требует ноль работы в простое.
+/// `paused: !isAnimating` in TimelineView is mandatory: without it the timeline
+/// keeps waking the renderer while paused, and the spec requires zero work when idle.
 public struct EqualizerView: View {
     private static let periods: [Double] = [0.9, 0.62, 1.15, 0.75, 0.95]
 

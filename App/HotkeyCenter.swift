@@ -2,12 +2,12 @@ import AppKit
 import Carbon.HIToolbox
 import os
 
-/// Глобальный хоткей через Carbon. Выбран сознательно:
-/// NSEvent.addGlobalMonitorForEvents(matching: .keyDown) потребовал бы
-/// разрешения Accessibility ещё до того, как оно понадобится для вставки.
+/// Global hotkey via Carbon. Chosen deliberately:
+/// NSEvent.addGlobalMonitorForEvents(matching: .keyDown) would require
+/// Accessibility permission before it's actually needed for pasting.
 ///
-/// Переназначение хоткея из настроек появится в плане 4 — тогда сюда
-/// заедет KeyboardShortcuts, которая является обёрткой над этим же API.
+/// Hotkey remapping from settings is planned for plan 4 — at that point
+/// KeyboardShortcuts, which wraps this same API, will land here.
 @MainActor
 final class HotkeyCenter {
     private var hotKeyRef: EventHotKeyRef?
@@ -18,7 +18,7 @@ final class HotkeyCenter {
     private static let hotKeyID: UInt32 = 1
     private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "HotkeyCenter")
 
-    /// По умолчанию ⌥Space: ⌘Space занят Spotlight.
+    /// Defaults to ⌥Space: ⌘Space is taken by Spotlight.
     func register(
         keyCode: UInt32 = UInt32(kVK_Space),
         modifiers: UInt32 = UInt32(optionKey),
@@ -52,7 +52,7 @@ final class HotkeyCenter {
                 let center = Unmanaged<HotkeyCenter>
                     .fromOpaque(userData)
                     .takeUnretainedValue()
-                // Carbon-обработчик вызывается на главном цикле выполнения.
+                // The Carbon handler is invoked on the main run loop.
                 MainActor.assumeIsolated { center.onFire?() }
                 return noErr
             },
@@ -62,30 +62,30 @@ final class HotkeyCenter {
             &eventHandler
         )
         guard installStatus == noErr else {
-            // Без лога отказ установки обработчика неотличим от исправно
-            // зарегистрированного, но никогда не срабатывающего хоткея:
-            // RegisterEventHotKey ниже всё равно «успешно» отработает.
-            Self.logFailure("Установка обработчика хоткея", status: installStatus, keyCode: keyCode, modifiers: modifiers)
+            // Without logging, a handler-install failure would be indistinguishable
+            // from a hotkey that registered fine but never fires: RegisterEventHotKey
+            // below will still "succeed" regardless.
+            Self.logFailure("Hotkey handler installation", status: installStatus, keyCode: keyCode, modifiers: modifiers)
             return
         }
 
         let id = EventHotKeyID(signature: Self.signature, id: Self.hotKeyID)
         let status = RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef)
         guard status == noErr else {
-            Self.logFailure("Регистрация хоткея", status: status, keyCode: keyCode, modifiers: modifiers)
+            Self.logFailure("Hotkey registration", status: status, keyCode: keyCode, modifiers: modifiers)
             return
         }
     }
 
-    /// Без этого лога отказ установки обработчика или регистрации хоткея
-    /// неотличим от хоткея, который просто никто не нажимает — единственный
-    /// способ узнать причину у пользователя ежедневного инструмента это
-    /// системный лог. Значения помечены .public: это диагностика для
-    /// Console.app, а не приватные данные пользователя — молча скрытые
-    /// редакцией по умолчанию значения свели бы лог обратно к бесполезному.
+    /// Without this log, a handler-install or hotkey-registration failure is
+    /// indistinguishable from a hotkey nobody is pressing — for a daily-driver
+    /// tool's user, the system log is the only way to find out why. Values are
+    /// marked .public: this is diagnostics for Console.app, not private user
+    /// data — values silently redacted by the default privacy policy would
+    /// make the log useless again.
     private static func logFailure(_ step: String, status: OSStatus, keyCode: UInt32, modifiers: UInt32) {
         logger.error(
-            "\(step, privacy: .public) не удалась (keyCode=\(keyCode, privacy: .public), modifiers=\(modifiers, privacy: .public)), OSStatus=\(status, privacy: .public). Вероятная причина: сочетание уже занято другим приложением или системой."
+            "\(step, privacy: .public) failed (keyCode=\(keyCode, privacy: .public), modifiers=\(modifiers, privacy: .public)), OSStatus=\(status, privacy: .public). Likely cause: the combination is already taken by another app or the system."
         )
     }
 
@@ -97,11 +97,11 @@ final class HotkeyCenter {
     }
 
     deinit {
-        // deinit класса на @MainActor не наследует изоляцию автоматически —
-        // компилятор считает его nonisolated, поэтому прямое чтение hotKeyRef/
-        // eventHandler здесь не проходит проверку типов Swift 6. Допущение то
-        // же, что и в обработчике выше: единственный владелец HotkeyCenter —
-        // NotchController, который существует только на MainActor.
+        // A class's deinit on @MainActor doesn't automatically inherit isolation —
+        // the compiler treats it as nonisolated, so reading hotKeyRef/eventHandler
+        // directly here fails Swift 6 type checking. Same assumption as in the
+        // handler above: HotkeyCenter's sole owner is NotchController, which only
+        // ever exists on MainActor.
         MainActor.assumeIsolated {
             if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
             if let eventHandler { RemoveEventHandler(eventHandler) }

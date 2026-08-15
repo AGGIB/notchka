@@ -1,17 +1,17 @@
 import SwiftUI
 import NotchCore
 
-/// Один закреплённый сниппет на сетке пинов.
+/// A single pinned snippet on the pins grid.
 ///
-/// Отдельный от `StashKit.Snippet` тип — тот же приём, что и у
-/// `ClipboardCard` относительно `ClipboardItem` (см. её doc в
-/// ClipboardTabView.swift): NotchUI не знает про StashKit, только про уже
-/// готовую модель показа, которую строит app-таргет (PinsViewModel).
+/// A separate type from `StashKit.Snippet` — the same trick as
+/// `ClipboardCard` relative to `ClipboardItem` (see its doc in
+/// ClipboardTabView.swift): NotchUI doesn't know about StashKit, only about
+/// the ready-made display model built by the app target (PinsViewModel).
 public struct PinChip: Identifiable, Equatable, Sendable {
-    /// `nil` — черновик формы добавления, ещё не сохранённый в базе. У всех
-    /// пинов, реально показанных на сетке, id всегда есть: PinsViewModel
-    /// строит чипы из уже прочитанного списка, где GRDB проставляет id при
-    /// вставке (см. Snippet.didInsert).
+    /// `nil` — a draft in the add form, not yet saved to the database. Every
+    /// pin actually shown on the grid always has an id: PinsViewModel
+    /// builds chips from an already-read list, where GRDB assigns the id on
+    /// insert (see Snippet.didInsert).
     public let id: Int64?
     public let label: String
     public let value: String
@@ -31,51 +31,52 @@ public struct PinChip: Identifiable, Equatable, Sendable {
         self.icon = icon
     }
 
-    /// Что нарисовано на чипе: фиксированная маска для чувствительных,
-    /// обрезанное по длине — для длинных. Труcкейт переиспользует
-    /// `ClipboardCard.preview` — то же правило «схлопнуть переводы строк и
-    /// обрезать по длине», что и у карточек буфера, а не второй такой же
-    /// алгоритм в этом же модуле.
+    /// What's drawn on the chip: a fixed mask for sensitive values,
+    /// length-truncated for long ones. The truncation reuses
+    /// `ClipboardCard.preview` — the same "collapse newlines and truncate by
+    /// length" rule used for clipboard cards, rather than a second copy of
+    /// the same algorithm in this module.
     public var displayValue: String {
         isSensitive ? Self.mask : ClipboardCard.preview(for: value, maxLength: Self.maxDisplayLength)
     }
 
-    /// Что реально уходит в пастборд и вставляется по клику — исходное
-    /// значение целиком, а не то, что нарисовано на чипе (решение №1
-    /// постановки задачи).
+    /// What actually goes to the pasteboard and gets inserted on click — the
+    /// original value in full, not what's drawn on the chip (decision #1
+    /// of the task spec).
     public var pasteValue: String { value }
 
-    /// Цвет полосы слева. Всегда возвращает значение: при пустом или
-    /// нечитаемом `colorHex` подставляется нейтральный дефолт, а не nil, —
-    /// у `PinsTabView` нет входного параметра `accent`, в отличие от
-    /// ClipboardTabView/MusicTabView (см. её doc), и каждый пин обязан сам
-    /// решить, каким цветом рисоваться.
+    /// Color of the left-hand stripe. Always returns a value: for an empty
+    /// or unparsable `colorHex` a neutral default is substituted instead of
+    /// nil — `PinsTabView` has no `accent` input parameter, unlike
+    /// ClipboardTabView/MusicTabView (see its doc), so each pin must decide
+    /// its own color on its own.
     public var accentOrDefault: Color {
         colorHex.flatMap(Self.resolvedColor(fromHex:)) ?? Self.defaultAccent
     }
 
-    /// Та же маска, что у `StashKit.Snippet.masked` — фиксированной длины,
-    /// не выдаёт длину настоящего значения (по числу точек ИИН отличим бы
-    /// был от номера карты). Строка продублирована, а не переиспользована:
-    /// NotchUI не зависит от StashKit (см. doc типа выше).
+    /// The same mask as `StashKit.Snippet.masked` — fixed length, doesn't
+    /// leak the real value's length (otherwise an IIN could be told apart
+    /// from a card number just by its dot count). The string is duplicated,
+    /// not reused: NotchUI doesn't depend on StashKit (see the type doc
+    /// above).
     private static let mask = "••• ••• •••"
 
-    /// Подобрано так, чтобы чип в двухколоночной сетке не растягивался на
-    /// всю ширину панели одним длинным значением: короткие email и номера
-    /// телефонов умещаются целиком, адреса и вставленный по ошибке длинный
-    /// текст — обрезаются с многоточием.
+    /// Chosen so a chip in the two-column grid doesn't stretch across the
+    /// whole panel width for one long value: short emails and phone numbers
+    /// fit in full, while addresses and accidentally pasted long text get
+    /// truncated with an ellipsis.
     private static let maxDisplayLength = 26
 
     private static let defaultAccent = Color.white.opacity(0.45)
 
-    /// Разбирает `"#RRGGBB"`/`"RRGGBB"`. Любой другой ввод — опечатка,
-    /// случайный текст — не цвет, а не повод ронять карточку: пин заводится
-    /// вручную через форму, и ошибка в шести символах не должна стоить всей
-    /// записи (см. PinChipTests.badColourFallsBack).
+    /// Parses `"#RRGGBB"`/`"RRGGBB"`. Any other input — a typo, random text
+    /// — isn't a color, but that's not a reason to drop the card: a pin is
+    /// added manually through the form, and an error in six characters
+    /// shouldn't cost the whole entry (see PinChipTests.badColourFallsBack).
     ///
-    /// `fileprivate`, а не `private`: PinEditorView ниже, в этом же файле,
-    /// переиспользует её для предпросмотра цвета в палитре выбора — второй
-    /// такой же разбор хексов был бы дублированием того же правила.
+    /// `fileprivate`, not `private`: PinEditorView below, in this same file,
+    /// reuses it for the color preview in the selection palette — a second
+    /// copy of the same hex-parsing rule would be duplication.
     fileprivate static func resolvedColor(fromHex hex: String) -> Color? {
         var sanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         if sanitized.hasPrefix("#") { sanitized.removeFirst() }
@@ -88,20 +89,21 @@ public struct PinChip: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Сетка закреплённых сниппетов: почта, номер карты, ИИН — то, ради чего
-/// затевался весь проект (см. бриф задачи). Два столбца, а не горизонтальная
-/// лента, как у буфера: пины короткие и однострочные, вертикальная сетка
-/// вмещает больше на той же площади без горизонтальной прокрутки.
+/// Grid of pinned snippets: email, card number, IIN — the whole reason this
+/// project exists (see the task brief). Two columns, not a horizontal strip
+/// like the clipboard: pins are short and single-line, and a vertical grid
+/// fits more in the same area without horizontal scrolling.
 ///
-/// Порядок меняется перетаскиванием (решение №2 постановки) — каждый чип
-/// одновременно и `.draggable`, и `.dropDestination`, а не отдельная ручка:
-/// на компактном чипе у ручки не нашлось бы места, а перетаскивание всей
-/// карточки — стандартный жест и для Finder, и для похожих сеток macOS.
+/// Order changes by dragging (decision #2 of the spec) — each chip is
+/// simultaneously both `.draggable` and a `.dropDestination`, not a
+/// separate handle: a compact chip has no room for a handle, and dragging
+/// the whole card is a standard gesture for both Finder and similar macOS
+/// grids.
 ///
-/// Форма добавления и правки живёт здесь же, внутри вкладки, переключаясь
-/// локальным состоянием, — тем же приёмом, что и inline-редактор заметок:
-/// в этом приложении нет отдельных окон под подзадачи, вся работа происходит
-/// в границах одной панели.
+/// The add/edit form lives right here, inside the tab, switching via local
+/// state — the same trick as the inline notes editor: this app has no
+/// separate windows for subtasks, all work happens within the bounds of one
+/// panel.
 public struct PinsTabView: View {
     private let chips: [PinChip]
     private let onActivate: (Int64) -> Void
@@ -109,8 +111,8 @@ public struct PinsTabView: View {
     private let onReorder: (Int64, Int) -> Void
     private let onEdit: (PinChip) -> Void
 
-    /// Состояние ⌥ — одно на всю сетку, тем же приёмом и с тем же
-    /// обоснованием, что и `ClipboardTabView.isOptionHeld`.
+    /// ⌥ state — one for the whole grid, the same trick and the same
+    /// rationale as `ClipboardTabView.isOptionHeld`.
     @State private var isOptionHeld = false
 
     @State private var editorMode: EditorMode = .hidden
@@ -123,10 +125,11 @@ public struct PinsTabView: View {
     private static let chipSpacing: CGFloat = 8
     private static let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
-    /// Что сейчас показано вместо сетки: ничего, форма нового пина или форма
-    /// правки существующего. Отдельный enum, а не два optional вперемешку
-    /// (`Bool` + `PinChip?`) — иначе «создаём новый» и «ничего не редактируем»
-    /// пришлось бы различать состоянием, которое само по себе это не выражает.
+    /// What's shown right now instead of the grid: nothing, the new-pin
+    /// form, or the edit form for an existing one. A separate enum, not two
+    /// interleaved optionals (`Bool` + `PinChip?`) — otherwise "creating a
+    /// new one" and "not editing anything" would have to be distinguished
+    /// by state that doesn't express that on its own.
     private enum EditorMode: Equatable {
         case hidden
         case creating
@@ -161,12 +164,12 @@ public struct PinsTabView: View {
         }
     }
 
-    /// Заголовок вкладки напоминает правило клика (решение №3 постановки) —
-    /// единственное место, где оно написано целиком: чип сам по себе ничем
-    /// не показывает, что ⌥ меняет его поведение.
+    /// The tab header reminds of the click rule (decision #3 of the spec) —
+    /// the only place it's written out in full: the chip itself gives no
+    /// indication that ⌥ changes its behavior.
     private var header: some View {
         HStack {
-            Text("Клик — вставить · ⌥клик — скопировать")
+            Text("Click — paste · ⌥click — copy")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.white.opacity(0.4))
             Spacer(minLength: 8)
@@ -185,7 +188,7 @@ public struct PinsTabView: View {
                 .background(Circle().fill(.white.opacity(0.08)))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Добавить пин")
+        .accessibilityLabel("Add pin")
     }
 
     @ViewBuilder
@@ -197,14 +200,15 @@ public struct PinsTabView: View {
         }
     }
 
-    /// Честный пустой экран — тот же принцип, что у «Буфер пуст» в
-    /// ClipboardTabView: вкладка уже работает, просто пока нечего показать.
+    /// An honest empty screen — the same principle as "Clipboard is empty"
+    /// in ClipboardTabView: the tab already works, there's just nothing to
+    /// show yet.
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: NotchTab.pins.symbolName)
                 .font(.system(size: 26, weight: .light))
                 .foregroundStyle(.white.opacity(0.22))
-            Text("Пока нет пинов")
+            Text("No pins yet")
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.4))
         }
@@ -261,10 +265,11 @@ public struct PinsTabView: View {
         editorMode = .editing(chip)
     }
 
-    /// Собирает итоговый чип из полей формы и отдаёт его наружу через
-    /// `onEdit` — id берётся из редактируемого чипа (правка) или остаётся
-    /// пустым (новый пин); что из двух в итоге произошло — add или update —
-    /// решает уже PinsViewModel по этому id (см. «что подключить» отчёта).
+    /// Assembles the final chip from the form fields and hands it out via
+    /// `onEdit` — the id comes from the edited chip (editing) or stays
+    /// empty (new pin); which of the two actually happened — add or update —
+    /// is decided by PinsViewModel from that id (see "what to wire up" in
+    /// the report).
     private func commitDraft() {
         let id: Int64?
         switch editorMode {
@@ -278,20 +283,22 @@ public struct PinsTabView: View {
         editorMode = .hidden
     }
 
-    /// Только персистентные пины попадают в `chips` — id у них всегда есть,
-    /// это гарантирует PinsViewModel, строящий чипы из уже прочитанной базы.
-    /// `0` здесь недостижим на практике, а не тихий обман: пустой id уронил
-    /// бы `.draggable` целиком, а не просто дал бы промах при перетаскивании.
+    /// Only persistent pins end up in `chips` — they always have an id,
+    /// guaranteed by PinsViewModel, which builds chips from an already-read
+    /// database. `0` here is unreachable in practice, not a silent lie: an
+    /// empty id would drop `.draggable` entirely, not just cause a miss on
+    /// drag.
     private func dragPayload(_ chip: PinChip) -> String {
         String(chip.id ?? 0)
     }
 
-    /// `Void`, а не `Bool`: на macOS 26 `dropDestination(for:action:)` без
-    /// `isEnabled` резолвится в перегрузку с `DropSession` и `-> Void`, а не
-    /// в более старую `-> Bool`, — с `Bool` здесь компилятор молча принимал
-    /// сигнатуру, но ронял предупреждение «result … is unused»: возврат
-    /// уходил в перегрузку, которая его не читает. Явный `Void` убирает саму
-    /// возможность угодить не в ту перегрузку, а не только предупреждение.
+    /// `Void`, not `Bool`: on macOS 26 `dropDestination(for:action:)`
+    /// without `isEnabled` resolves to the overload taking `DropSession`
+    /// and returning `-> Void`, not the older `-> Bool` one — with `Bool`
+    /// the compiler here silently accepted the signature but dropped a
+    /// "result … is unused" warning: the return value went to the overload
+    /// that doesn't read it. An explicit `Void` removes the very
+    /// possibility of hitting the wrong overload, not just the warning.
     private func handleDrop(_ items: [String], onto chip: PinChip) {
         guard let raw = items.first, let draggedID = Int64(raw),
               let destinationIndex = chips.firstIndex(where: { $0.id == chip.id })
@@ -300,11 +307,11 @@ public struct PinsTabView: View {
     }
 }
 
-/// Одна карточка сетки: цветная полоса слева, иконка, метка и значение.
-/// Правка вызывается отдельной кнопкой-карандашом, а не кликом по всей
-/// карточке — клик по карточке уже занят вставкой/копированием, и второе
-/// значение того же жеста ничем не отличалось бы для пользователя одно от
-/// другого до самого нажатия.
+/// One grid card: a colored stripe on the left, an icon, a label, and a
+/// value. Editing is triggered by a separate pencil button, not a tap on
+/// the whole card — a tap on the card is already taken by paste/copy, and a
+/// second meaning for the same gesture wouldn't be distinguishable to the
+/// user from the first one until the moment of the tap.
 private struct PinChipView: View {
     let chip: PinChip
     let onTap: () -> Void
@@ -365,10 +372,10 @@ private struct PinChipView: View {
         .padding(.vertical, 6)
     }
 
-    /// Видна не только по наведению, а всегда на малой прозрачности:
-    /// на трекпаде hover обнаруживается хуже, чем мышью, и кнопка,
-    /// целиком невидимая в покое, была бы недоступна для открытия одним
-    /// взглядом на панель.
+    /// Visible not only on hover but always at low opacity: on a trackpad
+    /// hover is detected worse than with a mouse, and a button that's
+    /// entirely invisible at rest would be undiscoverable from a single
+    /// glance at the panel.
     private var editButton: some View {
         Button(action: onEditTap) {
             Image(systemName: "pencil")
@@ -378,18 +385,18 @@ private struct PinChipView: View {
         }
         .buttonStyle(.plain)
         .padding(4)
-        .accessibilityLabel("Править «\(chip.label)»")
+        .accessibilityLabel("Edit \"\(chip.label)\"")
     }
 
     private var accessibilityLabel: String {
-        let valueLabel = chip.isSensitive ? "значение скрыто" : chip.displayValue
+        let valueLabel = chip.isSensitive ? "value hidden" : chip.displayValue
         return "\(chip.label): \(valueLabel)"
     }
 }
 
-/// Форма добавления/правки пина. Кнопки сохранения и отмены закреплены
-/// снизу вне прокрутки — поля выше могут прокручиваться, но не должны
-/// уносить с собой единственный способ форму закрыть.
+/// The pin add/edit form. Save and cancel buttons are pinned at the bottom
+/// outside the scroll area — the fields above may scroll, but shouldn't
+/// carry away the only way to close the form.
 private struct PinEditorView: View {
     @Binding var label: String
     @Binding var value: String
@@ -425,7 +432,7 @@ private struct PinEditorView: View {
     }
 
     private var labelField: some View {
-        TextField("Метка", text: $label)
+        TextField("Label", text: $label)
             .textFieldStyle(.plain)
             .font(.system(size: 11, weight: .medium))
             .padding(6)
@@ -433,7 +440,7 @@ private struct PinEditorView: View {
     }
 
     private var valueField: some View {
-        TextField("Значение", text: $value)
+        TextField("Value", text: $value)
             .textFieldStyle(.plain)
             .font(.system(size: 11))
             .padding(6)
@@ -444,13 +451,14 @@ private struct PinEditorView: View {
         RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.white.opacity(0.08))
     }
 
-    /// Тумблер — тем же нейтральным белым, что и остальной хром «Обсидиана»:
-    /// системный `.switch` по умолчанию красится акцентным цветом macOS, а
-    /// единственный цвет, которому здесь позволено быть цветом, а не белым
-    /// разной прозрачности, — сам пин (см. PinChip.accentOrDefault).
+    /// The toggle uses the same neutral white as the rest of "Obsidian"'s
+    /// chrome: the system `.switch` is tinted with the macOS accent color by
+    /// default, and the only color allowed here to be a color, rather than
+    /// white at varying opacity, is the pin itself (see
+    /// PinChip.accentOrDefault).
     private var sensitiveToggle: some View {
         Toggle(isOn: $isSensitive) {
-            Text("Чувствительное значение")
+            Text("Sensitive value")
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.75))
         }
@@ -469,7 +477,7 @@ private struct PinEditorView: View {
                         .background(Circle().fill(icon == symbol ? .white : .white.opacity(0.08)))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Иконка \(symbol)")
+                .accessibilityLabel("Icon \(symbol)")
             }
         }
     }
@@ -484,17 +492,17 @@ private struct PinEditorView: View {
                         .overlay(Circle().stroke(.white, lineWidth: colorHex == hex ? 2 : 0))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Цвет \(hex)")
+                .accessibilityLabel("Color \(hex)")
             }
         }
     }
 
     private var buttons: some View {
         HStack(spacing: 8) {
-            Button("Отмена", action: onCancel)
+            Button("Cancel", action: onCancel)
                 .buttonStyle(PinEditorButtonStyle(isProminent: false))
                 .keyboardShortcut(.cancelAction)
-            Button("Сохранить", action: onSave)
+            Button("Save", action: onSave)
                 .buttonStyle(PinEditorButtonStyle(isProminent: true))
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!canSave)
@@ -502,12 +510,12 @@ private struct PinEditorView: View {
     }
 }
 
-/// Кнопки формы. Тот же приём, что PlayPauseButtonStyle/PermissionButtonStyle
-/// в остальной панели: проминентная — сплошная белая с чёрным текстом,
-/// единственное намеренное исключение из «белого разной прозрачности» ради
-/// однозначно кликабельного основного действия; второстепенная — плашка
-/// низкой непрозрачности. Не переиспользует PermissionButtonStyle напрямую:
-/// та лежит в PermissionPromptView.swift как приватный тип этого файла.
+/// Form buttons. The same trick as PlayPauseButtonStyle/PermissionButtonStyle
+/// elsewhere in the panel: the prominent one is solid white with black text,
+/// the one deliberate exception to "white at varying opacity" for the sake
+/// of an unambiguously clickable primary action; the secondary one is a
+/// low-opacity plate. Doesn't reuse PermissionButtonStyle directly: that one
+/// lives in PermissionPromptView.swift as a private type of that file.
 private struct PinEditorButtonStyle: ButtonStyle {
     let isProminent: Bool
 

@@ -2,51 +2,52 @@ import SwiftUI
 import Foundation
 import NotchCore
 
-/// Относительная подпись времени заметки: время — сегодня, «вчера» — вчера,
-/// календарная дата — раньше.
+/// Relative timestamp label for a note: time of day for today, "yesterday"
+/// for yesterday, calendar date for anything earlier.
 ///
-/// Вынесено из вьюхи по тому же принципу, что и TrackFormatting в
-/// MusicTabView: чистая функция от даты и точки отсчёта, которую тест
-/// проверяет без окна.
+/// Pulled out of the view on the same principle as TrackFormatting in
+/// MusicTabView: a pure function of a date and a reference point that a
+/// test can verify without a window.
 public enum NoteFormatting {
-    /// `calendar` — параметром со значением по умолчанию `.current`, а не
-    /// `.current` внутри тела напрямую: иначе «сегодня» и «вчера» зависели
-    /// бы от часового пояса машины, на которой запущен код, а не от
-    /// переданных дат — тест, зелёный у автора, был бы красным у того, кто
-    /// запустит его восточнее или западнее (см. NoteFormattingTests).
+    /// `calendar` is a parameter defaulting to `.current`, not `.current`
+    /// used directly in the body: otherwise "today" and "yesterday" would
+    /// depend on the time zone of the machine running the code rather than
+    /// on the dates passed in — a test green for the author would go red
+    /// for someone running it further east or west (see NoteFormattingTests).
     ///
-    /// Порог — календарные сутки, а не «минус 24 часа»: заметка, сделанная
-    /// в 23:59, при вычитании фиксированного интервала показывала бы
-    /// «вчера» уже через минуту, хотя календарно это тот же день.
-    /// `Calendar.isDate(_:inSameDayAs:)` сравнивает именно по суткам, и
-    /// сравнение не зависит от знака разницы — будущая дата не роняет его.
+    /// The threshold is a calendar day, not "minus 24 hours": a note made
+    /// at 23:59, under a fixed-interval subtraction, would show "yesterday"
+    /// a minute later, even though calendrically it's the same day.
+    /// `Calendar.isDate(_:inSameDayAs:)` compares by calendar day
+    /// specifically, and the comparison doesn't depend on the sign of the
+    /// difference — a future date doesn't break it.
     public static func relativeDate(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         if calendar.isDate(date, inSameDayAs: now) {
             return timeOfDay(date, calendar: calendar)
         }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
            calendar.isDate(date, inSameDayAs: yesterday) {
-            return "вчера"
+            return "yesterday"
         }
         return calendarDate(date, calendar: calendar)
     }
 
-    /// «14:32» — часы и минуты по переданному календарю. Ручной расчёт двух
-    /// компонентов, а не DateFormatter: формат фиксирован (24-часовой, с
-    /// нулём спереди) и не подстраивается под локаль, так что объект
-    /// форматтера здесь не даёт ничего, кроме лишней аллокации.
+    /// "14:32" — hours and minutes per the given calendar. Manual
+    /// computation of the two components rather than DateFormatter: the
+    /// format is fixed (24-hour, zero-padded) and doesn't adapt to locale,
+    /// so a formatter object here buys nothing but an extra allocation.
     private static func timeOfDay(_ date: Date, calendar: Calendar) -> String {
         let hour = calendar.component(.hour, from: date)
         let minute = calendar.component(.minute, from: date)
         return String(format: "%02d:%02d", hour, minute)
     }
 
-    /// «15 янв» — день и сокращённое имя месяца через DateFormatter, а не
-    /// свой массив названий: у переданного `calendar` может быть любая
-    /// система (сигнатура не требует григорианский), и свой список из 12
-    /// русских имён был бы неверен или вышел бы за его пределы — в
-    /// еврейском календаре, например, в високосный год 13 месяцев. ICU
-    /// внутри DateFormatter знает имена месяцев для любой системы разом.
+    /// "Jan 15" — day and abbreviated month name via DateFormatter, not a
+    /// custom name array: the given `calendar` can be any calendar system
+    /// (the signature doesn't require Gregorian), and a hardcoded list of
+    /// 12 month names would be wrong or run out of bounds — the Hebrew
+    /// calendar, for instance, has 13 months in a leap year. The ICU data
+    /// inside DateFormatter knows month names for any calendar system at once.
     private static func calendarDate(_ date: Date, calendar: Calendar) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
@@ -57,14 +58,15 @@ public enum NoteFormatting {
     }
 }
 
-/// Одна заметка для отображения во вкладке — снимок на момент чтения, а не
-/// живая ссылка на запись базы (то же решение, что и у ClipboardCard).
+/// One note for display in the tab — a snapshot at read time, not a live
+/// reference to the database record (the same decision as ClipboardCard).
 ///
-/// `relativeDate` уже посчитан вызывающей стороной (см. NotesViewModel) от
-/// `createdAt`, а не `updatedAt`: список отсортирован по времени создания
-/// (см. doc NotesRepository.all()), и подпись обязана согласовываться с
-/// этим порядком — иначе строка «сегодня» оказалась бы внизу ленты у
-/// заметки, которую лишь недавно поправили, а создали неделю назад.
+/// `relativeDate` is already computed by the caller (see NotesViewModel)
+/// from `createdAt`, not `updatedAt`: the list is sorted by creation time
+/// (see doc NotesRepository.all()), and the label has to stay consistent
+/// with that ordering — otherwise the "today" label would end up at the
+/// bottom of the feed for a note that was only recently edited but
+/// created a week ago.
 public struct NoteRow: Identifiable, Equatable, Sendable {
     public let id: Int64
     public let body: String
@@ -77,11 +79,11 @@ public struct NoteRow: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Вкладка быстрых заметок: поле создания сверху, лента ниже.
+/// Quick notes tab: a composer field on top, the feed below.
 ///
-/// Без markdown-рендера и без отдельного окна редактирования — решение
-/// владельца: инлайн-редактор размером с ладонь не место для форматирования
-/// (см. бриф задачи 5, спека §7).
+/// No markdown rendering and no separate editing window — an owner's
+/// decision: a palm-sized inline editor is no place for formatting
+/// (see task 5 brief, spec §7).
 public struct NotesTabView: View {
     private let rows: [NoteRow]
     private let draft: Binding<String>
@@ -90,13 +92,13 @@ public struct NotesTabView: View {
     private let onCommitEdit: (NoteRow.ID, String) -> Void
     private let onDelete: (NoteRow.ID) -> Void
 
-    /// Какая заметка сейчас раскрыта инлайн-редактором.
+    /// Which note is currently expanded into an inline editor.
     ///
-    /// Локальное состояние вьюхи, а не модели: в отличие от
-    /// ClipboardViewModel.selectedID (который отражает реальное содержимое
-    /// пастборда — факт, осмысленный и за пределами вьюхи), то, какая
-    /// заметка раскрыта прямо сейчас, не значит ничего вне текущего сеанса
-    /// просмотра панели — тот же класс состояния, что и isHovering у
+    /// Local view state, not model state: unlike
+    /// ClipboardViewModel.selectedID (which reflects the actual pasteboard
+    /// contents — a fact that's meaningful beyond the view), which note is
+    /// expanded right now means nothing outside the current panel viewing
+    /// session — the same class of state as isHovering on
     /// ClipboardCardView.
     @State private var expandedID: NoteRow.ID?
 
@@ -124,18 +126,19 @@ public struct NotesTabView: View {
             NoteComposerView(
                 text: draft,
                 accent: accent,
-                // Пока раскрыт инлайн-редактор существующей заметки, ⌘↩
-                // композера отключается (см. doc NoteComposerView) — иначе
-                // одно и то же сочетание было бы навешено разом на две
-                // кнопки, и то, какая из них сработает, решал бы responder
-                // chain, а не код.
+                // While an existing note's inline editor is expanded, the
+                // composer's ⌘↩ is disabled (see doc NoteComposerView) —
+                // otherwise the same shortcut would be attached to two
+                // buttons at once, and which one fires would be decided by
+                // the responder chain, not the code.
                 isEnabled: expandedID == nil,
                 onSave: onSave
             )
             if rows.isEmpty {
-                // Честный пустой экран — тот же приём, что у «Буфер пуст»
-                // в ClipboardTabView и «Ничего не играет» в MusicTabView.
-                Text("Заметок пока нет")
+                // An honest empty state — the same approach as "Clipboard
+                // is empty" in ClipboardTabView and "Nothing playing" in
+                // MusicTabView.
+                Text("No notes yet")
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.4))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -166,8 +169,9 @@ public struct NotesTabView: View {
                     )
                 }
             }
-            // Хвост ленты не должен обрезаться заподлицо с краем скролла —
-            // тот же приём, что и у горизонтальной ленты ClipboardTabView.
+            // The tail of the feed shouldn't get clipped flush with the
+            // scroll edge — the same approach as ClipboardTabView's
+            // horizontal feed.
             .padding(.bottom, 2)
         }
     }
@@ -177,16 +181,16 @@ public struct NotesTabView: View {
     }
 }
 
-/// Поле создания новой заметки.
+/// New note composer field.
 ///
-/// `⌘↩` сохраняет, обычный `↩` переносит строку: заметка может занимать
-/// больше одной строки, и Return, отправляющий её на середине мысли, мешал
-/// бы, а не помогал — decision №1 постановки задачи 5.
+/// `⌘↩` saves, plain `↩` inserts a newline: a note can span more than one
+/// line, and a Return that submits it mid-thought would get in the way
+/// rather than help — decision #1 of the task 5 spec.
 private struct NoteComposerView: View {
     @Binding var text: String
     let accent: Color
-    /// `false`, пока раскрыт инлайн-редактор другой заметки — см. doc
-    /// вызова в NotesTabView.body.
+    /// `false` while another note's inline editor is expanded — see the
+    /// doc at the call site in NotesTabView.body.
     let isEnabled: Bool
     let onSave: () -> Void
 
@@ -195,9 +199,9 @@ private struct NoteComposerView: View {
     private static let fieldHeight: CGFloat = 40
     private static let buttonDiameter: CGFloat = 26
 
-    /// Пустой ввод не даёт нажать сохранение — первая линия защиты из двух,
-    /// требуемых постановкой (см. doc NotesViewModel.saveDraft для второй,
-    /// на случай гонки за эту проверку).
+    /// Empty input keeps the save action from firing — the first of two
+    /// safeguards required by the spec (see doc NotesViewModel.saveDraft
+    /// for the second, covering a race past this check).
     private var isTextEmpty: Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -211,34 +215,35 @@ private struct NoteComposerView: View {
         }
     }
 
-    /// Отступ сверху для настоящего текста внутри TextEditor и для
-    /// плейсхолдера поверх него — одна константа на двоих, а не два
-    /// независимых числа. TextEditor рисует курсор по своему встроенному
-    /// внутреннему отступу, который меньше восьми пунктов; без этой
-    /// добавки набранный текст начинался бы выше, чем обещает положение
-    /// плейсхолдера, и они бы визуально разъезжались в момент первого
-    /// нажатия клавиши.
+    /// Top inset for the real text inside TextEditor and for the
+    /// placeholder overlaid on it — one constant shared by both, not two
+    /// independent numbers. TextEditor draws its cursor at its own
+    /// built-in inner inset, which is less than eight points; without
+    /// this addition, typed text would start higher than the
+    /// placeholder's position promises, and the two would visibly drift
+    /// apart the moment the first key is pressed.
     private static let textTopInset: CGFloat = 8
 
     private var field: some View {
         TextEditor(text: $text)
             .font(.system(size: 12))
             .foregroundStyle(.white.opacity(0.9))
-            // Без этого TextEditor рисует свой непрозрачный системный фон
-            // поверх чёрной панели — на «Обсидиане» это выглядело бы дырой.
+            // Without this, TextEditor draws its own opaque system
+            // background over the black panel — on "Obsidian" it would
+            // look like a hole.
             .scrollContentBackground(.hidden)
             .padding(.top, Self.textTopInset)
             .frame(height: Self.fieldHeight)
-            // TextEditor на macOS — известный баг SwiftUI: заданная .frame
-            // высота ограничивает то, что о размере узнаёт родитель, но не
-            // то, что реально рисуется — сама NSScrollView внутри может
-            // отрисоваться на полный размер содержимого поверх границ.
-            // Без .clipped() поле растягивалось на всю доступную высоту
-            // вкладки, а не на положенные 40 pt.
+            // TextEditor on macOS — a known SwiftUI bug: the .frame height
+            // you set constrains what the parent learns about the size,
+            // but not what actually gets drawn — the NSScrollView inside
+            // can render at its full content size, overflowing the
+            // bounds. Without .clipped() the field would stretch to the
+            // tab's full available height instead of the intended 40 pt.
             .clipped()
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
-                    Text("Новая заметка…")
+                    Text("New note…")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.3))
                         .padding(.top, Self.textTopInset)
@@ -251,13 +256,12 @@ private struct NoteComposerView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.white.opacity(0.06))
             )
-            .accessibilityLabel("Новая заметка")
+            .accessibilityLabel("New note")
     }
 
-    /// Кнопка сохранения — обязательно настоящий `Button`, а не вьюха,
-    /// оборачивающая его: `.keyboardShortcut` привязывается к элементу
-    /// управления, на котором вызван напрямую, а не «просвечивает» сквозь
-    /// составную обёртку.
+    /// Save button — must be an actual `Button`, not a view wrapping one:
+    /// `.keyboardShortcut` binds to the control it's called on directly,
+    /// it doesn't "shine through" a composite wrapper.
     private var saveButton: some View {
         Button(action: onSave) {
             Image(systemName: "arrow.up")
@@ -270,18 +274,19 @@ private struct NoteComposerView: View {
         .keyboardShortcut(.return, modifiers: .command)
         .disabled(isSaveDisabled)
         .onHover { isSaveHovering = $0 }
-        .accessibilityLabel("Сохранить заметку")
+        .accessibilityLabel("Save note")
     }
 }
 
-/// Одна заметка ленты: свёрнутая строка или раскрытый инлайн-редактор.
+/// One feed note: a collapsed row or an expanded inline editor.
 ///
-/// Свёрнутое и раскрытое состояния — разные ветки `body`, а не один и тот же
-/// каркас с условной начинкой: у раскрытого состояния несколько независимо
-/// доступных элементов управления (поле, «Отмена», «Сохранить»), и общий
-/// `.accessibilityElement(children: .combine)` на весь блок сделал бы их
-/// недостижимыми для VoiceOver по отдельности — см. ниже collapsedRow, где
-/// combine применён только к описательному тексту, не к кнопке удаления.
+/// Collapsed and expanded states are separate `body` branches, not one
+/// shared frame with conditional contents: the expanded state has
+/// several independently accessible controls (the field, "Cancel",
+/// "Save"), and a single `.accessibilityElement(children: .combine)` over
+/// the whole block would make them unreachable for VoiceOver
+/// individually — see collapsedRow below, where combine is applied only
+/// to the descriptive text, not to the delete button.
 private struct NoteRowView: View {
     let row: NoteRow
     let isExpanded: Bool
@@ -290,10 +295,10 @@ private struct NoteRowView: View {
     let onCommit: (String) -> Void
     let onDelete: () -> Void
 
-    /// Черновик правки — локальный для строки: гонять каждое нажатие
-    /// клавиши через модель незачем, пока правка не подтверждена. Заводится
-    /// заново из row.body при каждом раскрытии (см. collapsedRow.onTapGesture),
-    /// так что отменённая правка не переживает следующее открытие.
+    /// Edit draft — local to the row: no need to push every keystroke
+    /// through the model until the edit is confirmed. It's reseeded from
+    /// row.body on every expand (see collapsedRow.onTapGesture), so a
+    /// cancelled edit doesn't survive the next opening.
     @State private var editText: String = ""
     @State private var isHovering = false
 
@@ -325,9 +330,10 @@ private struct NoteRowView: View {
         }
     }
 
-    /// Дата и превью объединены в одну доступную область — это и есть
-    /// кликабельная зона раскрытия, поэтому combine/label/trait висят
-    /// именно здесь, а не на всей строке (см. doc типа).
+    /// Date and preview are combined into one accessible region — this is
+    /// exactly the tappable area that triggers expansion, which is why
+    /// combine/label/trait live here, not on the whole row (see the
+    /// type's doc).
     private var content: some View {
         HStack(spacing: 8) {
             Text(row.relativeDate)
@@ -346,7 +352,7 @@ private struct NoteRowView: View {
             onToggle()
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Заметка от \(row.relativeDate): \(row.body)")
+        .accessibilityLabel("Note from \(row.relativeDate): \(row.body)")
         .accessibilityAddTraits(.isButton)
     }
 
@@ -364,28 +370,29 @@ private struct NoteRowView: View {
                 .foregroundStyle(.white.opacity(0.9))
                 .scrollContentBackground(.hidden)
                 .frame(height: Self.editorHeight)
-                // Тот же баг TextEditor, что и у поля создания выше (см.
-                // её doc в NoteComposerView.field) — без .clipped() этот
-                // редактор разросся бы точно так же при первом раскрытии.
+                // The same TextEditor bug as the composer field above (see
+                // its doc in NoteComposerView.field) — without .clipped()
+                // this editor would grow the same way the first time it's
+                // expanded.
                 .clipped()
-                .accessibilityLabel("Текст заметки")
+                .accessibilityLabel("Note text")
             editorActions
         }
     }
 
-    /// Обе кнопки — буквальные `Button`, не через оборачивающую вьюху:
-    /// `.keyboardShortcut` на «Сохранить» привязывается к элементу
-    /// управления, на котором вызван напрямую, а не «просвечивает» сквозь
-    /// составную обёртку (тот же приём и то же обоснование, что у
+    /// Both buttons are literal `Button`s, not routed through a wrapping
+    /// view: `.keyboardShortcut` on "Save" binds to the control it's
+    /// called on directly, it doesn't "shine through" a composite wrapper
+    /// (the same approach and the same rationale as
     /// NoteComposerView.saveButton).
     private var editorActions: some View {
         HStack(spacing: 10) {
-            Button("Отмена", action: onToggle)
+            Button("Cancel", action: onToggle)
                 .buttonStyle(.plain)
                 .font(.system(size: 10))
                 .foregroundStyle(.white.opacity(0.5))
             Spacer(minLength: 0)
-            Button("Сохранить") { onCommit(editText) }
+            Button("Save") { onCommit(editText) }
                 .buttonStyle(.plain)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(isEditEmpty ? .white.opacity(0.25) : accent)
@@ -398,9 +405,9 @@ private struct NoteRowView: View {
         editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Корзина — по наведению или пока строка раскрыта, не постоянно:
-    /// удаление достаточно необратимо, чтобы не держать его на виду у
-    /// каждой заметки в свёрнутом состоянии.
+    /// Trash icon — on hover or while the row is expanded, not
+    /// permanently: deletion is irreversible enough that it shouldn't sit
+    /// in view on every note in its collapsed state.
     private var deleteButton: some View {
         Button(action: onDelete) {
             Image(systemName: "trash")
@@ -408,16 +415,17 @@ private struct NoteRowView: View {
                 .foregroundStyle(.white.opacity(0.4))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Удалить заметку")
+        .accessibilityLabel("Delete note")
     }
 
-    /// Заметка одной строкой для свёрнутой карточки: переводы строк
-    /// схлопываются в пробелы, иначе Text с lineLimit(1) обрежет ровно по
-    /// первому «\n», а не по ширине, и спрячет остальной текст без
-    /// многоточия. Тот же приём, что у ClipboardCard.preview, но
-    /// независимая копия — вкладки не должны зависеть друг от друга ради
-    /// вспомогательной функции, которая завтра может разойтись (например,
-    /// показ первой непустой строки вместо схлопывания всех).
+    /// Note flattened to a single line for the collapsed card: newlines
+    /// collapse into spaces, otherwise Text with lineLimit(1) would
+    /// truncate right at the first "\n" rather than by width, hiding the
+    /// rest of the text without an ellipsis. The same approach as
+    /// ClipboardCard.preview, but an independent copy — tabs shouldn't
+    /// depend on each other for a helper function that might diverge
+    /// tomorrow (e.g. showing the first non-empty line instead of
+    /// collapsing them all).
     private static func previewLine(for body: String, maxLength: Int) -> String {
         let flattened = body
             .split(whereSeparator: \.isNewline)
@@ -429,10 +437,11 @@ private struct NoteRowView: View {
     }
 }
 
-/// Круглая кнопка сохранения композера. Заливка акцентом, когда доступна, —
-/// единственный цвет «Обсидиана» здесь и обозначает саму доступность
-/// действия, а не просто украшает кнопку; в остальном фон — белый низкой
-/// прозрачности, глиф — белый, тем же языком, что и остальной хром панели.
+/// The composer's round save button. Accent fill when enabled is the only
+/// "Obsidian" color here, and it signals the action's availability itself
+/// rather than just decorating the button; otherwise the background is
+/// low-opacity white and the glyph is white, the same visual language as
+/// the rest of the panel's chrome.
 private struct NoteActionButtonStyle: ButtonStyle {
     let isEnabled: Bool
     let isHovering: Bool

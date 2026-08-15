@@ -5,50 +5,51 @@ import NotchStore
 import NotchUI
 import os
 
-/// Модель вкладки буфера обмена.
+/// Clipboard tab model.
 ///
-/// В отличие от MusicViewModel не держит постоянной подписки: история
-/// читается только пока раскрыта сама вкладка буфера (см. `refresh()`,
-/// вызываемый из NotchRootView.task(id:) тем же приёмом, что и обновление
-/// позиции трека) — в покое приложению нечего опрашивать, спека требует
-/// именно этого.
+/// Unlike MusicViewModel, doesn't hold a persistent subscription: history
+/// is only read while the clipboard tab itself is expanded (see `refresh()`,
+/// called from NotchRootView.task(id:) with the same approach as track
+/// position updates) — at rest the app has nothing to poll, and the spec
+/// requires exactly that.
 @MainActor
 @Observable
 final class ClipboardViewModel {
     private(set) var cards: [ClipboardCard] = []
-    /// Карточка последнего действия (вставки или копирования) — лента
-    /// подсвечивает её акцентной обводкой как подтверждение того, что сейчас
-    /// лежит в пастборде. `nil`, пока пользователь ничего не нажал в этом
-    /// сеансе.
+    /// Card for the last action (paste or copy) — the feed
+    /// highlights it with an accent outline as confirmation of what's currently
+    /// in the pasteboard. `nil` until the user has clicked something in this
+    /// session.
     private(set) var selectedID: Int64?
 
     @ObservationIgnored private let repository: ClipboardRepository
-    /// Полные записи по id — карточка хранит только усечённое превью
-    /// (см. ClipboardCard.preview), а вставлять и копировать нужно исходное
-    /// содержимое.
+    /// Full records by id — the card only stores a truncated preview
+    /// (see ClipboardCard.preview), but pasting and copying need the original
+    /// content.
     @ObservationIgnored private var itemsByID: [Int64: ClipboardItem] = [:]
 
-    // nonisolated: без этого статический logger унаследовал бы MainActor-
-    // изоляцию класса и был бы недоступен из nonisolated-функций ниже,
-    // которые сознательно уводят чтение базы и блобов с главного потока —
-    // тот же приём и то же обоснование, что у ClipboardService.logger.
+    // nonisolated: without this the static logger would inherit the class's
+    // MainActor isolation and would be unreachable from the nonisolated functions
+    // below, which deliberately move database and blob reads off the main
+    // thread — the same approach and rationale as ClipboardService.logger.
     nonisolated private static let logger = Logger(subsystem: "kz.mobilefirst.notchka", category: "clipboard-tab")
 
-    /// Сколько последних записей показывать. Лента прокручивается вбок, а не
-    /// подгружается порциями по мере скролла, поэтому число — компромисс
-    /// между «видно историю вглубь» и «не декодировать сотню миниатюр на
-    /// каждое открытие вкладки».
+    /// How many recent records to show. The feed scrolls sideways rather than
+    /// loading in chunks as you scroll, so the number is a compromise
+    /// between "history visible far enough back" and "not decoding a hundred
+    /// thumbnails on every tab open".
     private static let limit = 50
-    /// Символов в текстовом превью карточки. Подобрано под её ширину (см.
-    /// ClipboardTabView.ClipboardCardView.width = 76 pt) — при переносе на
-    /// мелком шрифте карточка заполняется по высоте, не убегая за край на
-    /// более длинном тексте.
+    /// Characters in the card's text preview. Tuned to its width (see
+    /// ClipboardTabView.ClipboardCardView.width = 76 pt) — when wrapped at the
+    /// small font size, the card fills up in height without overflowing the
+    /// edge on longer text.
     private static let previewMaxLength = 64
 
-    /// Зовётся сразу после того, как модель что-то положила в пастборд.
-    /// Через него служба слежения помечает изменение как своё и не читает
-    /// его обратно — иначе достанутая из истории картинка тут же попадала бы
-    /// в неё второй раз, в другом представлении и с другим хешем.
+    /// Called right after the model has put something on the pasteboard.
+    /// The watcher service uses it to mark the change as its own and not read
+    /// it back — otherwise an image pulled from history would immediately land
+    /// back in it a second time, in a different representation and with a
+    /// different hash.
     @ObservationIgnored private let didWritePasteboard: () -> Void
 
     init(repository: ClipboardRepository, didWritePasteboard: @escaping () -> Void = {}) {
@@ -56,39 +57,39 @@ final class ClipboardViewModel {
         self.didWritePasteboard = didWritePasteboard
     }
 
-    /// Перечитывает историю. Вызывать при каждом открытии вкладки — модель
-    /// не держит постоянной подписки на базу (см. doc класса).
+    /// Re-reads history. Call on every tab open — the model doesn't hold a
+    /// persistent subscription to the database (see the class doc).
     func refresh() async {
         let repository = repository
         let snapshot = await Self.loadRecent(repository: repository, limit: Self.limit)
         apply(snapshot)
     }
 
-    /// Клик по карточке: содержимое вставляется в приложение, бывшее
-    /// фронтовым до разворота панели (frontmostApplication приходит снаружи —
-    /// NotchController.frontmostApplicationBeforeExpanding захватывает его
-    /// раньше, чем панель заберёт фокус себе).
+    /// Card click: content is pasted into the application that was frontmost
+    /// before the panel expanded (frontmostApplication comes from outside —
+    /// NotchController.frontmostApplicationBeforeExpanding captures it before
+    /// the panel takes focus for itself).
     ///
-    /// Вставляются все три типа, а не только текст: правило «клик вставляет,
-    /// ⌥клик копирует» оговорок по типу содержимого не имеет, и пользователь,
-    /// кликнувший по скриншоту, не должен гадать, почему в этот раз ничего
-    /// не произошло. Картинка и файл идут в пастборд объектами, но ⌘V после
-    /// этого посылается тот же самый — ему всё равно, что там лежит.
+    /// All three types get pasted, not just text: the rule "click pastes,
+    /// ⌥click copies" has no exceptions by content type, and a user who clicked
+    /// a screenshot shouldn't have to guess why nothing happened this time.
+    /// Images and files go onto the pasteboard as objects, but the same ⌘V is
+    /// sent afterward — it doesn't care what's on it.
     func activate(id: Int64, frontmostApplication: NSRunningApplication?) {
         guard let item = itemsByID[id] else { return }
         if item.kind == .text {
             PasteService.paste(item.textBody ?? "", into: frontmostApplication)
             markDelivered(id)
         } else {
-            // Обводка ставится не здесь, а после того, как байты реально
-            // доехали до пастборда: чтение блоба может и не удаться, а
-            // обводка обещает пользователю «вот это сейчас в буфере».
+            // The outline is set not here, but after the bytes have actually
+            // made it to the pasteboard: reading the blob can fail, and the
+            // outline promises the user "this is now in the clipboard".
             deliverBlob(item, pastingInto: frontmostApplication)
         }
         touchAndRefresh(id: id)
     }
 
-    /// ⌥клик: только копирование, без вставки.
+    /// ⌥click: copy only, no paste.
     func copyOnly(id: Int64) {
         guard let item = itemsByID[id] else { return }
         if item.kind == .text {
@@ -100,18 +101,18 @@ final class ClipboardViewModel {
         touchAndRefresh(id: id)
     }
 
-    /// Отмечает карточку как ту, чьё содержимое сейчас в пастборде, и
-    /// сообщает об этом службе слежения, чтобы она не прочитала нашу же
-    /// запись обратно.
+    /// Marks the card as the one whose content is currently in the pasteboard,
+    /// and notifies the watcher service so it doesn't read our own record
+    /// back.
     private func markDelivered(_ id: Int64) {
         selectedID = id
         didWritePasteboard()
     }
 
-    /// Поднимает запись наверх ленты в базе и тут же перечитывает историю,
-    /// чтобы переупорядочивание было видно сразу, в той же открытой панели —
-    /// решение №2 постановки требует, чтобы вставленный элемент оказался в
-    /// начале ленты, а не только при следующем открытии вкладки.
+    /// Bumps the record to the top of the feed in the database and immediately
+    /// re-reads history, so the reordering is visible right away, in the same
+    /// open panel — spec decision #2 requires the pasted item to end up at the
+    /// start of the feed, not only on the next tab open.
     private func touchAndRefresh(id: Int64) {
         let repository = repository
         Task(priority: .utility) {
@@ -120,21 +121,22 @@ final class ClipboardViewModel {
         }
     }
 
-    /// Достаёт байты картинки или файла и кладёт их в пастборд, а при
-    /// непустом `application` — сразу вставляет.
+    /// Fetches the bytes of an image or file and puts them on the pasteboard,
+    /// and if `application` is non-nil, pastes them right away.
     ///
-    /// Всё, что трогает диск — и чтение блоба, и восстановление файла, —
-    /// делается внутри фоновой задачи, до возврата на главный поток.
-    /// Скопированный скриншот бывает мегабайтным, и что чтение, что запись
-    /// таких объёмов на потоке, рисующем панель, её подвешивают.
+    /// Everything that touches disk — both reading the blob and restoring the
+    /// file — happens inside the background task, before returning to the main
+    /// thread. A copied screenshot can be megabytes in size, and either
+    /// reading or writing that much data on the thread that draws the panel
+    /// would freeze it.
     private func deliverBlob(_ item: ClipboardItem, pastingInto application: NSRunningApplication?) {
         let repository = repository
         Task(priority: .utility) {
             guard let data = await Self.loadBlob(repository: repository, item: item) else { return }
-            // Файл восстанавливается здесь же, вне главного потока: запись
-            // байтов на диск — такой же ввод-вывод, как их чтение, и
-            // оставлять её на MainActor значило бы починить одну половину
-            // проблемы и не заметить вторую.
+            // The file is restored right here, off the main thread: writing
+            // bytes to disk is just as much I/O as reading them, and
+            // leaving it on MainActor would mean fixing one half of the
+            // problem and missing the other.
             let fileURL = item.kind == .file
                 ? await Self.writeTemporaryFile(data, name: item.textBody)
                 : nil
@@ -142,8 +144,8 @@ final class ClipboardViewModel {
         }
     }
 
-    /// NSImage и работа с NSPasteboard — на главном потоке: платформенная
-    /// картинка не Sendable и покидать MainActor не должна.
+    /// NSImage and NSPasteboard work happen on the main thread: the platform
+    /// image type isn't Sendable and shouldn't leave MainActor.
     private func deliver(
         _ data: Data, fileURL: URL?, item: ClipboardItem, pastingInto application: NSRunningApplication?
     ) {
@@ -156,7 +158,7 @@ final class ClipboardViewModel {
             guard let fileURL else { return }
             objects = [fileURL as NSURL]
         case .text:
-            return  // сюда не попадает: текст идёт через PasteService напрямую
+            return  // never reached here: text goes through PasteService directly
         }
 
         if let application {
@@ -168,70 +170,72 @@ final class ClipboardViewModel {
         markDelivered(id)
     }
 
-    /// Восстанавливает файл во временном каталоге под исходным именем.
-    /// История хранит копию байтов, а не путь (см. BlobStore) — класть на
-    /// пастборд ссылку на давно исчезнувший или перемещённый оригинал было
-    /// бы нечестно, поэтому создаётся новый файл с тем же содержимым и
-    /// именем, и уже он идёт на пастборд.
+    /// Restores the file in a temporary directory under its original name.
+    /// History stores a copy of the bytes, not a path (see BlobStore) — putting
+    /// a reference to a long-gone or moved original on the pasteboard would be
+    /// dishonest, so a new file with the same content and name is created, and
+    /// that's what goes on the pasteboard.
     ///
-    /// `async` не для красоты: без него функция выполнилась бы прямо на
-    /// MainActor вызывающего, и `nonisolated` ничего бы не изменил — уводит
-    /// с актора именно `await` на функции без привязки к нему.
+    /// `async` isn't cosmetic: without it the function would run directly on
+    /// the caller's MainActor, and `nonisolated` alone wouldn't change that —
+    /// it's specifically `await` on a function with no actor binding that
+    /// moves execution off the actor.
     nonisolated private static func writeTemporaryFile(_ data: Data, name: String?) async -> URL? {
-        let fileName = (name?.isEmpty == false) ? name! : "файл"
+        let fileName = (name?.isEmpty == false) ? name! : "file"
         let fileURL = temporaryDirectory.appendingPathComponent(fileName)
         do {
-            // Каталог пересоздаётся целиком перед каждой выдачей: иначе
-            // восстановленные файлы копились бы во временной папке до
-            // перезагрузки, по одному на каждый клик по файловой карточке.
-            // Отданный ранее файл к этому моменту уже вставлен.
+            // The directory is recreated from scratch before every delivery:
+            // otherwise restored files would pile up in the temp folder until
+            // reboot, one per click on a file card. The previously delivered
+            // file has already been pasted by this point.
             try? FileManager.default.removeItem(at: temporaryDirectory)
             try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
             try data.write(to: fileURL, options: .atomic)
             return fileURL
         } catch {
-            logger.error("не удалось восстановить файл из истории буфера: \(error, privacy: .public)")
+            logger.error("failed to restore file from clipboard history: \(error, privacy: .public)")
             return nil
         }
     }
 
-    /// Куда восстанавливаются файлы из истории. Один каталог на всё
-    /// приложение, а не новый на каждую выдачу — см. writeTemporaryFile.
+    /// Where files from history are restored to. One directory for the whole
+    /// app, not a new one per delivery — see writeTemporaryFile.
     nonisolated private static let temporaryDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("kz.mobilefirst.notchka-paste", isDirectory: true)
 
-    /// Читает блоб вне главного потока. `async`, хотя `ClipboardRepository
-    /// .data(for:)` сама по себе синхронна: именно `await` на асинхронной
-    /// nonisolated-функции гарантирует уход с MainActor, независимо от того,
-    /// чем в итоге изолировано вызывающее замыкание Task — не пожелание, а
-    /// свойство самого await на функции без привязки к актору.
+    /// Reads the blob off the main thread. `async`, even though
+    /// `ClipboardRepository.data(for:)` is itself synchronous: it's precisely
+    /// `await` on an async nonisolated function that guarantees leaving
+    /// MainActor, regardless of what the calling Task closure ends up isolated
+    /// to — not a wish, but a property of await itself on a function with no
+    /// actor binding.
     nonisolated private static func loadBlob(repository: ClipboardRepository, item: ClipboardItem) async -> Data? {
         do {
             return try repository.data(for: item)
         } catch {
-            logger.error("не удалось прочитать блоб карточки буфера: \(error, privacy: .public)")
+            logger.error("failed to read clipboard card blob: \(error, privacy: .public)")
             return nil
         }
     }
 
-    /// Поднимает запись наверх ленты в базе, потом читает свежий список —
-    /// обе операции вне главного потока, одной цепочкой без промежуточного
-    /// возврата на MainActor между ними.
+    /// Bumps the record to the top of the feed in the database, then reads
+    /// the fresh list — both operations off the main thread, in one chain
+    /// with no intermediate return to MainActor between them.
     nonisolated private static func touchAndFetch(
         repository: ClipboardRepository, id: Int64, limit: Int
     ) async -> (items: [ClipboardItem], blobs: [Int64: Data]) {
         do {
             try repository.touch(id: id)
         } catch {
-            logger.error("не удалось поднять запись \(id, privacy: .public) наверх ленты: \(error, privacy: .public)")
+            logger.error("failed to bump record \(id, privacy: .public) to the top of the feed: \(error, privacy: .public)")
         }
         return await loadRecent(repository: repository, limit: limit)
     }
 
-    /// Список последних записей и байты картинок среди них — вне главного
-    /// потока целиком. Байты читаются здесь же, а не отдельным проходом по
-    /// требованию: миниатюры нужны сразу при открытии вкладки, а решение №5
-    /// постановки требует уводить чтение блобов с главного потока.
+    /// The list of recent records and the bytes of images among them —
+    /// entirely off the main thread. The bytes are read right here, not in a
+    /// separate on-demand pass: thumbnails are needed right when the tab opens,
+    /// and spec decision #5 requires moving blob reads off the main thread.
     nonisolated private static func loadRecent(
         repository: ClipboardRepository, limit: Int
     ) async -> (items: [ClipboardItem], blobs: [Int64: Data]) {
@@ -244,20 +248,20 @@ final class ClipboardViewModel {
             }
             return (items, blobs)
         } catch {
-            logger.error("не удалось прочитать историю буфера: \(error, privacy: .public)")
+            logger.error("failed to read clipboard history: \(error, privacy: .public)")
             return ([], [:])
         }
     }
 
-    /// Строит карточки из уже готового снимка данных, включая Image()
-    /// миниатюр, — на главном потоке, как требует решение №5 постановки.
+    /// Builds cards from an already-ready data snapshot, including thumbnail
+    /// Image() instances — on the main thread, as spec decision #5 requires.
     private func apply(_ snapshot: (items: [ClipboardItem], blobs: [Int64: Data])) {
         var byID: [Int64: ClipboardItem] = [:]
         var built: [ClipboardCard] = []
         built.reserveCapacity(snapshot.items.count)
         for item in snapshot.items {
             guard let id = item.id else {
-                Self.logger.error("запись истории буфера без id пропущена при построении ленты")
+                Self.logger.error("clipboard history record without id skipped while building the feed")
                 continue
             }
             byID[id] = item
@@ -265,7 +269,7 @@ final class ClipboardViewModel {
                 id: id,
                 kind: Self.cardKind(for: item.kind),
                 preview: Self.preview(for: item),
-                source: item.sourceAppName ?? "Неизвестно",
+                source: item.sourceAppName ?? "Unknown",
                 isPinned: item.isPinned,
                 thumbnail: snapshot.blobs[id].flatMap { NSImage(data: $0) }.map(Image.init(nsImage:))
             ))
@@ -282,17 +286,18 @@ final class ClipboardViewModel {
         }
     }
 
-    /// Превью карточки. Для картинки — не подпись поверх пустоты: показать
-    /// её саму обязан thumbnail (см. ClipboardCard), а этот текст — лишь
-    /// запасной вариант на случай, если байты не декодировались в Image.
+    /// Card preview. For an image this isn't a caption over emptiness:
+    /// showing the image itself is thumbnail's job (see ClipboardCard), and
+    /// this text is only a fallback for when the bytes failed to decode into
+    /// an Image.
     private static func preview(for item: ClipboardItem) -> String {
         switch item.kind {
         case .text:
             ClipboardCard.preview(for: item.textBody ?? "", maxLength: previewMaxLength)
         case .file:
-            ClipboardCard.preview(for: item.textBody ?? "Файл", maxLength: previewMaxLength)
+            ClipboardCard.preview(for: item.textBody ?? "File", maxLength: previewMaxLength)
         case .image:
-            "Изображение"
+            "Image"
         }
     }
 }

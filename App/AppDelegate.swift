@@ -15,60 +15,60 @@ import os
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: NotchPanel?
     private var controller: NotchController?
-    /// Токен подписки на смену конфигурации экранов — хранится, чтобы снять
-    /// подписку в deinit.
+    /// Subscription token for screen configuration changes — stored so the
+    /// subscription can be removed in deinit.
     private var screenParametersObserver: NSObjectProtocol?
-    /// Токен подписки на смену активного Space — тем же путём, что и
-    /// screenParametersObserver, снимается в deinit. Долг фундамента:
-    /// машина состояний обрабатывает .fullScreenChanged с плана 1, но до
-    /// этой подписки отправлять его было некому (см. handleActiveSpaceChange).
+    /// Subscription token for active Space changes — removed in deinit the
+    /// same way as screenParametersObserver. Foundation debt: the state
+    /// machine has handled .fullScreenChanged since plan 1, but before this
+    /// subscription there was no one to send it (see handleActiveSpaceChange).
     private var activeSpaceObserver: NSObjectProtocol?
-    /// Источник сигнала SIGTERM — хранится, иначе GCD освободит его сразу
-    /// после resume() и обработчик никогда не сработает.
+    /// SIGTERM signal source — stored, otherwise GCD would release it right
+    /// after resume() and the handler would never fire.
     private var terminationSource: (any DispatchSourceSignal)?
 
-    /// Корень репозитория, где лежит вендоренная копия адаптера.
+    /// Repository root where the vendored copy of the adapter lives.
     ///
-    /// Вычисляется от расположения этого файла на диске: сейчас приложение
-    /// работает только из дерева исходников (см. AdapterPaths.vendored), и
-    /// другого способа найти vendor/ нет. В плане 4 адаптер переезжает
-    /// внутрь бандла приложения — тогда это единственное место обновится на
-    /// путь внутри Bundle.main, а не на вычисление через #filePath.
+    /// Computed from this file's location on disk: right now the app only
+    /// runs from the source tree (see AdapterPaths.vendored), and there's no
+    /// other way to find vendor/. In plan 4 the adapter moves inside the app
+    /// bundle — then this single spot will be updated to a path inside
+    /// Bundle.main instead of a computation via #filePath.
     private static let developmentRepoRoot: URL = {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()  // AppDelegate.swift -> App
-            .deletingLastPathComponent()  // App -> корень репозитория
+            .deletingLastPathComponent()  // App -> repository root
     }()
 
-    /// Модель музыки живёт весь срок работы приложения, а не пересоздаётся
-    /// вместе с панелью в refreshNotchScreen(): адаптеру и его
-    /// perl-подпроцессу нет дела до геометрии чёлки, которая может пропадать
-    /// и появляться (закрытая крышка, смена монитора) независимо от того,
-    /// играет ли в этот момент музыка. Пересоздавать пайплайн на каждое
-    /// такое событие означало бы бессмысленно перезапускать внешний процесс.
+    /// The music model lives for the app's entire runtime instead of being
+    /// recreated along with the panel in refreshNotchScreen(): the adapter and
+    /// its perl subprocess don't care about notch geometry, which can appear
+    /// and disappear (closed lid, monitor change) independently of whether
+    /// music happens to be playing at that moment. Recreating the pipeline on
+    /// every such event would mean pointlessly restarting the external process.
     private let musicModel = MusicViewModel(
         provider: AdapterProvider(paths: AdapterPaths.vendored(repoRoot: developmentRepoRoot))
     )
 
-    /// Служба истории буфера обмена. Optional, а не `let` с прямой
-    /// инициализацией, как у `musicModel`: `NotchDatabase.init` и `migrate()`
-    /// бросают (например, при нехватке места на диске), а отказ здесь не
-    /// должен ронять всё приложение — чёлка и музыка вполне работают без
-    /// истории буфера. Поднимается в startStorage(), см. её doc.
+    /// Clipboard history service. Optional rather than a `let` with direct
+    /// initialization like `musicModel`: `NotchDatabase.init` and `migrate()`
+    /// can throw (e.g. when disk space runs out), and a failure here shouldn't
+    /// bring down the whole app — the notch and music work fine without
+    /// clipboard history. Set up in startStorage(), see its doc.
     private var clipboardService: ClipboardService?
 
-    /// Репозиторий истории буфера — тот же экземпляр, что получает
-    /// ClipboardService. Второе соединение с той же базой заводить незачем:
-    /// DatabaseQueue сериализует доступ сам, поэтому один репозиторий вполне
-    /// обслуживает и опрос пастборда, и вкладку буфера (см.
-    /// startStorage() и refreshNotchScreen()).
+    /// Clipboard history repository — the same instance that ClipboardService
+    /// receives. No point opening a second connection to the same database:
+    /// DatabaseQueue serializes access on its own, so one repository is enough
+    /// to serve both pasteboard polling and the clipboard tab (see
+    /// startStorage() and refreshNotchScreen()).
     private var clipboardRepository: ClipboardRepository?
 
-    /// Репозитории заметок и пинов — та же база, что и у буфера (общая
-    /// миграция v3-stash поверх v1/v2, см. NotchDatabase.migrate()).
-    /// Заводить отдельную NotchDatabase под них незачем по той же причине,
-    /// что и у clipboardRepository выше: DatabaseQueue сериализует доступ
-    /// сам, второе соединение с тем же файлом не даёт ничего, кроме риска.
+    /// Notes and pins repositories — the same database as the clipboard's
+    /// (shared v3-stash migration on top of v1/v2, see NotchDatabase.migrate()).
+    /// No point setting up a separate NotchDatabase for them, for the same
+    /// reason as clipboardRepository above: DatabaseQueue serializes access on
+    /// its own, and a second connection to the same file gives nothing but risk.
     private var notesRepository: NotesRepository?
     private var snippetsRepository: SnippetsRepository?
 
@@ -88,13 +88,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startStorage()
         refreshNotchScreen()
 
-        // Единственное уведомление AppKit, покрывающее сразу докинг/раздокинг
-        // внешнего монитора, смену разрешения и открытие/закрытие крышки —
-        // все они двигают origin встроенного экрана в глобальных координатах
-        // или вовсе меняют состав NSScreen.screens. Без этой подписки
-        // geometry и screenFrame, снятые один раз при запуске, замирают
-        // навсегда: горячая зона перестаёт совпадать с курсором, а окно —
-        // с самим вырезом, как только раскладка мониторов меняется.
+        // The single AppKit notification that covers external monitor
+        // docking/undocking, resolution changes, and opening/closing the lid all
+        // at once — all of them move the built-in screen's origin in global
+        // coordinates, or change the makeup of NSScreen.screens outright. Without
+        // this subscription, the geometry and screenFrame captured once at launch
+        // freeze forever: the hot zone stops matching the cursor, and the window
+        // stops matching the notch itself, as soon as the monitor layout changes.
         screenParametersObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -105,14 +105,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // activeSpaceDidChangeNotification — единственный публичный сигнал о
-        // смене активного Space, и он же срабатывает, когда какое-то
-        // приложение (не обязательно наше — API не различает, чьё именно)
-        // входит или выходит из фуллскрина: на macOS фуллскрин всегда живёт
-        // в отдельном Space. Сама по себе смена Space ничего не говорит про
-        // фуллскрин — переключение между двумя обычными рабочими столами
-        // шлёт то же уведомление, — поэтому решение принимается по факту,
-        // проверкой в handleActiveSpaceChange().
+        // activeSpaceDidChangeNotification — the only public signal for an active
+        // Space change, and it also fires when some app (not necessarily ours —
+        // the API doesn't distinguish whose) enters or exits fullscreen: on macOS
+        // fullscreen always lives in its own Space. A Space change by itself says
+        // nothing about fullscreen — switching between two ordinary desktops sends
+        // the same notification — so the decision is made after the fact, by
+        // checking in handleActiveSpaceChange().
         activeSpaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil,
@@ -125,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     deinit {
-        // Тот же приём и то же обоснование, что в HotkeyCenter.deinit / CursorMonitor.deinit.
+        // Same technique and same rationale as in HotkeyCenter.deinit / CursorMonitor.deinit.
         MainActor.assumeIsolated {
             if let screenParametersObserver {
                 NotificationCenter.default.removeObserver(screenParametersObserver)
@@ -136,52 +135,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// SIGTERM — то, чем `pkill -x Notchka` (сейчас единственный способ
-    /// остановить это приложение: у accessory-приложения без Dock-иконки
-    /// нет пункта меню «Quit») завершает процесс. По умолчанию это
-    /// происходит мгновенно, в обход AppKit и раскрутки стека Swift — ни
-    /// один deinit не выполняется, adapter-подпроцесс осиротевает.
-    /// Подтверждено ручной проверкой: без этого обработчика `pgrep -f
-    /// mediaremote-adapter` после `pkill -x Notchka` находил живой процесс.
+    /// SIGTERM — what `pkill -x Notchka` (currently the only way to stop this
+    /// app: an accessory app with no Dock icon has no "Quit" menu item) uses to
+    /// terminate the process. By default this happens instantly, bypassing
+    /// AppKit and Swift's stack unwinding — not a single deinit runs, and the
+    /// adapter subprocess is orphaned. Confirmed by manual testing: without
+    /// this handler, `pgrep -f mediaremote-adapter` after `pkill -x Notchka`
+    /// found a live process.
     ///
-    /// `signal(SIGTERM, SIG_IGN)` обязателен и должен идти первым — иначе
-    /// DispatchSourceSignal сигнал не перехватит. Это задокументированное
-    /// требование GCD, а не предположение.
+    /// `signal(SIGTERM, SIG_IGN)` is mandatory and must come first — otherwise
+    /// DispatchSourceSignal won't intercept the signal. This is a documented
+    /// GCD requirement, not an assumption.
     private func installTerminationHandling() {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         source.setEventHandler { [weak self] in
-            // Источник сигнала выполняет обработчик на очереди .main, то
-            // есть фактически на том же потоке, что MainActor, — тот же
-            // приём и то же обоснование, что в HotkeyCenter.onFire.
+            // The signal source runs the handler on the .main queue, i.e.
+            // effectively the same thread as MainActor — same technique and same
+            // rationale as in HotkeyCenter.onFire.
             MainActor.assumeIsolated { self?.shutDown() }
         }
         source.resume()
         terminationSource = source
     }
 
-    /// Останавливает адаптер и только потом завершает процесс.
+    /// Stops the adapter and only then terminates the process.
     ///
-    /// Task {} здесь безопасен и не виснет: обработчик GCD выше выполняется
-    /// на обычной main-очереди, а не в контексте сырого сигнала, поэтому
-    /// планирование async-работы и дальнейшая раскрутка событийного цикла
-    /// ничем не блокированы. exit(0), а не NSApp.terminate(_:) — нужна
-    /// гарантия, что процесс не завершится раньше, чем musicModel.stopAdapter()
-    /// реально отправит SIGINT адаптеру и дождётся его; NSApp.terminate(_:)
-    /// такой гарантии не даёт.
+    /// Task {} is safe here and won't hang: the GCD handler above runs on a
+    /// regular main queue, not in the context of a raw signal, so scheduling
+    /// async work and the subsequent run-loop unwinding aren't blocked by
+    /// anything. exit(0), not NSApp.terminate(_:) — we need a guarantee that
+    /// the process won't terminate before musicModel.stopAdapter() actually
+    /// sends SIGINT to the adapter and waits for it; NSApp.terminate(_:) gives
+    /// no such guarantee.
     private func shutDown() {
-        // Страховка по сроку. `signal(SIGTERM, SIG_IGN)` выше сделан на всю
-        // жизнь процесса, поэтому если остановка адаптера подвиснет — скажем,
-        // актор занят незавершённой командой, — то exit(0) ниже не случится
-        // никогда, и `pkill` перестанет убивать приложение вовсе. До этого
-        // обработчика SIGTERM убивал гарантированно, и терять это свойство
-        // нельзя: осиротевший подпроцесс дешевле неубиваемого приложения.
+        // Deadline safety net. `signal(SIGTERM, SIG_IGN)` above is set for the
+        // entire life of the process, so if stopping the adapter hangs — say, the
+        // actor is busy with an unfinished command — then the exit(0) below will
+        // never happen, and `pkill` will stop killing the app altogether. Before
+        // this handler, SIGTERM killed the process reliably, and that property
+        // can't be lost: an orphaned subprocess is cheaper than an unkillable app.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.shutdownDeadline) {
             exit(1)
         }
-        // Синхронно и сразу: остановка таймеров не требует ожидания, в
-        // отличие от адаптера музыки ниже, — тот же уклад, что и у
-        // musicModel.stopAdapter(), но без async.
+        // Synchronously and right away: stopping the timers doesn't require
+        // waiting, unlike the music adapter below — the same layout as
+        // musicModel.stopAdapter(), but without async.
         clipboardService?.stop()
         Task {
             await musicModel.stopAdapter()
@@ -189,21 +188,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Сколько ждём корректной остановки адаптера, прежде чем выйти силой.
-    /// Спайк намерил, что адаптер завершается по SIGINT меньше чем за секунду,
-    /// так что двух хватает с запасом на планирование.
+    /// How long we wait for a clean adapter shutdown before force-exiting.
+    /// A spike measured that the adapter terminates on SIGINT in under a
+    /// second, so two seconds leaves plenty of margin for scheduling.
     private static let shutdownDeadline: TimeInterval = 2
 
-    /// Открывает общую базу (буфер, заметки, пины — одна миграция на всех)
-    /// и запускает слежение за пастбордом (см. ClipboardService).
+    /// Opens the shared database (clipboard, notes, pins — one migration for
+    /// all of them) and starts watching the pasteboard (see ClipboardService).
     ///
-    /// Отдельным методом, а не прямой инициализацией свойств, как у
-    /// musicModel: `NotchDatabase.init` и `migrate()` бросают, а брошенное
-    /// внутри инициализатора хранимого свойства уронило бы весь процесс
-    /// запуска приложения. Отказ здесь — не повод не показывать чёлку и не
-    /// играть музыку, поэтому ошибка только логируется, а все три хранилища
-    /// остаются не поднятыми: вкладки буфера, заметок и пинов в этом случае
-    /// показывают заглушку вместо содержимого (см. content(for:) ниже).
+    /// A separate method rather than direct property initialization like
+    /// musicModel: `NotchDatabase.init` and `migrate()` can throw, and a throw
+    /// inside a stored property's initializer would bring down the entire app
+    /// launch process. A failure here is not a reason to hide the notch or
+    /// stop playing music, so the error is only logged, and all three stores
+    /// remain unopened: in that case the clipboard, notes, and pins tabs show
+    /// a placeholder instead of content (see content(for:) below).
     private func startStorage() {
         do {
             let location = StoreLocation(bundleID: "kz.mobilefirst.notchka")
@@ -219,41 +218,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             notesRepository = NotesRepository(database: database)
             snippetsRepository = SnippetsRepository(database: database)
         } catch {
-            Self.logger.error("не удалось поднять хранилище: \(error, privacy: .public)")
+            Self.logger.error("failed to set up storage: \(error, privacy: .public)")
         }
     }
 
-    /// Приводит панель и контроллер в соответствие текущей конфигурации
-    /// экранов. Вызывается при запуске и затем при каждой смене конфигурации.
-    /// Три исхода: чёлка нашлась (впервые или заново, например крышка была
-    /// закрыта на старте) — панель создаётся; экран с чёлкой остался, но
-    /// сдвинулся или изменился — geometry и фрейм окна обновляются на месте;
-    /// чёлка пропала — панель убирается, а не висит по устаревшим координатам.
+    /// Brings the panel and controller in line with the current screen
+    /// configuration. Called at launch and then on every configuration change.
+    /// Three outcomes: the notch was found (for the first time or again, e.g.
+    /// the lid was closed at launch) — the panel is created; the screen with
+    /// the notch stayed but moved or changed — geometry and the window frame
+    /// are updated in place; the notch disappeared — the panel is torn down
+    /// instead of lingering at stale coordinates.
     private func refreshNotchScreen() {
         guard let screen = ScreenMetricsReader.builtInScreen(),
               let metrics = ScreenMetricsReader.metrics(for: screen),
               let geometry = NotchGeometryCalculator.geometry(for: metrics)
         else {
-            Self.logger.notice("Дисплей с чёлкой недоступен: панель не отображается")
+            Self.logger.notice("No notch display available: panel is not shown")
             teardownPanel()
             return
         }
 
-        // Окно фиксировано по максимальному развороту и центрировано над вырезом.
+        // The window is fixed to its maximum expanded size and centered above the notch.
         let frame = panelFrame(for: screen, size: PanelMetrics.windowSize)
 
         if let controller, let panel {
-            // Чёлка та же, но экран сдвинулся или изменился: обновляем
-            // геометрию и позицию окна на месте, не пересоздавая мониторы
-            // курсора и хоткея — им нечего переучивать, кроме координат.
+            // Same notch, but the screen moved or changed: update geometry and
+            // window position in place, without recreating the cursor and hotkey
+            // monitors — they have nothing to relearn except coordinates.
             controller.updateGeometry(geometry, screenFrame: screen.frame)
             panel.setFrame(frame, display: true)
             return
         }
 
-        // Контроллеру нужна уже существующая панель (см. NotchController),
-        // поэтому окно создаётся с пустым содержимым и получает настоящее
-        // сразу же, синхронно, до первой отрисовки.
+        // The controller needs an already-existing panel (see NotchController),
+        // so the window is created with empty content and gets its real content
+        // right away, synchronously, before the first render.
         let panel = NotchPanel(contentRect: frame, rootView: EmptyView())
 
         let controller = NotchController(
@@ -261,32 +261,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             screenFrame: screen.frame,
             panel: panel
         )
-        // Модели буфера, заметок и пинов строятся один раз здесь же, вместе
-        // с контроллером — не в свойствах AppDelegate, как musicModel:
-        // репозитории появляются позже, в startStorage(), а не в момент
-        // инициализации AppDelegate, так что готовые экземпляры
-        // musicModel-стиля завести нельзя. Дальше они живут внутри
-        // NotchRootView ровно тот же срок, что и сам контроллер — повторные
-        // вызовы refreshNotchScreen() (смена экрана) сюда не доходят, см.
-        // ранний return выше.
+        // The clipboard, notes, and pins models are built once here, together
+        // with the controller — not as AppDelegate properties like musicModel:
+        // the repositories appear later, in startStorage(), not at the moment
+        // AppDelegate is initialized, so a musicModel-style ready-made instance
+        // isn't possible here. From here on they live inside NotchRootView for
+        // exactly as long as the controller itself — repeated calls to
+        // refreshNotchScreen() (screen changes) don't reach this point, see the
+        // early return above.
         let clipboardModel = clipboardRepository.map { repository in
             ClipboardViewModel(repository: repository) { [weak self] in
-                // Служба помечает наше собственное изменение пастборда как
-                // прочитанное. Иначе достанутая из истории картинка через
-                // доли секунды вернётся в неё вторым элементом: с пастборда
-                // она приходит в другом представлении, хеш не совпадает, и
-                // дедупликация её не ловит.
+                // Marks our own pasteboard write as already seen. Otherwise an image
+                // pulled from history would come back into it as a second entry a
+                // fraction of a second later: it arrives from the pasteboard in a
+                // different representation, the hash doesn't match, and
+                // deduplication doesn't catch it.
                 self?.clipboardService?.ignoreOwnPasteboardWrite()
             }
         }
         let notesModel = notesRepository.map(NotesViewModel.init(repository:))
         let pinsModel = snippetsRepository.map { repository in
             PinsViewModel(repository: repository) { [weak self] in
-                // Тот же приём и то же обоснование, что у clipboardModel
-                // выше: без этой отметки опрос пастборда через доли секунды
-                // прочитал бы значение пина обратно и добавил бы его в
-                // историю буфера отдельной записью — открытым текстом, даже
-                // если пин помечен чувствительным.
+                // Same technique and same rationale as clipboardModel above: without
+                // this mark, pasteboard polling would read the pin's value back a
+                // fraction of a second later and add it to clipboard history as a
+                // separate entry — in plain text, even if the pin is marked sensitive.
                 self?.clipboardService?.ignoreOwnPasteboardWrite()
             }
         }
@@ -304,38 +303,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.panel = panel
     }
 
-    /// Реакция на смену активного Space: пересчитывает признак фуллскрина и
-    /// шлёт его в машину состояний. Спека §5 требует отключать панель в
-    /// фуллскрине — на чёлочном дисплее там нет ни меню-бара, ни видимого
-    /// выреза, панели негде жить.
+    /// Reaction to an active Space change: recomputes the fullscreen flag and
+    /// sends it to the state machine. Spec §5 requires disabling the panel in
+    /// fullscreen — on the notch display there's neither a menu bar nor a
+    /// visible notch there, and the panel has nowhere to live.
     ///
-    /// Признак дешёвый и косвенный, а не гарантированный: прямого API
-    /// «фуллскрин ли сейчас чужой процесс» в AppKit нет, поэтому используется
-    /// предположение, что safeAreaInsets.top встроенного экрана (высота зоны
-    /// меню-бара) схлопывается в 0, когда меню-бар скрыт чужим фуллскрином.
-    /// Живьём на этой машине не проверено — сессия оказалась залочена, и
-    /// тестовый переход в fullscreen (обычное окно, toggleFullScreen на
-    /// самом себе) завис на willEnterFullScreen и не завершился ни разу.
-    /// Отсюда лог на debug-уровне ниже: он даёт способ проверить дёшево,
-    /// не поднимая заново весь этот пробник.
+    /// The signal is cheap and indirect, not guaranteed: AppKit has no direct
+    /// API for "is some other process fullscreen right now", so this relies on
+    /// the assumption that the built-in screen's safeAreaInsets.top (the menu
+    /// bar area height) collapses to 0 when the menu bar is hidden by another
+    /// app's fullscreen. Not verified live on this machine — the session ended
+    /// up locked, and the test transition to fullscreen (a regular window,
+    /// toggleFullScreen on itself) got stuck on willEnterFullScreen and never
+    /// completed. Hence the debug-level log below: it gives a cheap way to
+    /// verify this without setting up this whole probe again.
     private func handleActiveSpaceChange() {
         guard let screen = Self.hardwareBuiltInScreen() else { return }
         let topInset = screen.safeAreaInsets.top
         let isFullScreen = topInset <= 0
         Self.logger.debug(
-            "Смена активного Space: safeAreaInsets.top=\(topInset, privacy: .public) → isFullScreen=\(isFullScreen, privacy: .public)"
+            "Active Space change: safeAreaInsets.top=\(topInset, privacy: .public) → isFullScreen=\(isFullScreen, privacy: .public)"
         )
         controller?.handle(.fullScreenChanged(isFullScreen))
     }
 
-    /// Встроенный дисплей, найденный по аппаратному признаку
-    /// (CGDisplayIsBuiltin), а не по наличию выреза.
+    /// The built-in display, found by the hardware flag (CGDisplayIsBuiltin),
+    /// not by the presence of a notch.
     ///
-    /// ScreenMetricsReader.builtInScreen() ищет экран с safeAreaInsets.top > 0
-    /// — это правильно для его задачи (нет выреза — не с чем считать
-    /// геометрию), но здесь этот же inset и есть искомый сигнал: в фуллскрине
-    /// он временно схлопывается в 0, и фильтр ScreenMetricsReader в этот
-    /// момент перестал бы находить именно тот экран, за которым мы следим.
+    /// ScreenMetricsReader.builtInScreen() looks for a screen with
+    /// safeAreaInsets.top > 0 — that's correct for its job (no notch, nothing
+    /// to compute geometry from), but here that very same inset is the signal
+    /// we're looking for: in fullscreen it temporarily collapses to 0, and at
+    /// that moment ScreenMetricsReader's filter would stop finding exactly the
+    /// screen we're tracking.
     private static func hardwareBuiltInScreen() -> NSScreen? {
         NSScreen.screens.first { screen in
             guard let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
@@ -352,20 +352,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return CGRect(origin: origin, size: size)
     }
 
-    /// Убирает панель вместе с контроллером: монитор курсора и хоткей
-    /// останавливаются явно — без чёлки на экране им нечего делать.
+    /// Tears down the panel together with the controller: the cursor monitor
+    /// and hotkey are stopped explicitly — with no notch on screen, they have
+    /// nothing to do.
     ///
-    /// Явно, а не через deinit, и close() вместо orderOut(nil), потому что
-    /// обнуление ссылок здесь никого не освобождает. orderOut прячет окно, но
-    /// оставляет его в списке окон приложения, а contentView панели держит
-    /// NotchRootView и через него контроллер. Раньше отсюда уходили, обнулив
-    /// обе ссылки, — и монитор курсора с зарегистрированным хоткеем продолжали
-    /// жить в недостижимом контроллере. При возвращении чёлки создавался
-    /// второй контроллер и регистрировал хоткей поверх ещё живого первого.
+    /// Explicitly, rather than via deinit, and close() instead of
+    /// orderOut(nil), because zeroing out references here doesn't release
+    /// anything. orderOut hides the window but leaves it in the app's window
+    /// list, and the panel's contentView holds onto NotchRootView and, through
+    /// it, the controller. This used to just zero out both references and
+    /// leave — and the cursor monitor with its registered hotkey kept living
+    /// inside an unreachable controller. When the notch came back, a second
+    /// controller was created and registered its hotkey on top of the still-
+    /// living first one.
     private func teardownPanel() {
-        // Порядок обязателен: сначала глушим источники событий, иначе
-        // сработавший в процессе разбора хоткей или движение курсора позвали бы
-        // handle() и через него syncMouseHandling() на уже закрываемом окне.
+        // Order matters: silence the event sources first, otherwise a hotkey
+        // firing mid-teardown or cursor movement would call handle() and
+        // through it syncMouseHandling() on a window that's already closing.
         controller?.stop()
         panel?.contentView = nil
         panel?.close()
@@ -374,60 +377,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Мост между контроллером/моделью музыки и оболочкой панели.
+/// Bridge between the controller/music model and the panel shell.
 ///
-/// NotchPanelView лежит в NotchUI и принимает NotchState значением, а не
-/// сам контроллер, — иначе AppKit-независимый пакет пришлось бы завязывать
-/// на App-таргет. Поэтому controller.state читается именно здесь, внутри
-/// body: Observation подписывается на свойство только там, где оно было
-/// прочитано во время отрисовки, — вычисли это значение один раз в
-/// refreshNotchScreen() и передай константой, подписки бы не возникло, и
-/// панель навсегда застыла бы в состоянии на момент запуска. То же самое
-/// рассуждение относится и к musicModel — это тоже @Observable, и его
-/// свойства (track/position/artwork/accent) читаются здесь же, внутри body
-/// (через content(for:), вызываемый непосредственно из body), а не заранее.
+/// NotchPanelView lives in NotchUI and takes NotchState by value, not the
+/// controller itself — otherwise the AppKit-independent package would have
+/// to be tied to the App target. That's why controller.state is read right
+/// here, inside body: Observation only subscribes to a property where it
+/// was read during rendering — compute this value once in
+/// refreshNotchScreen() and pass it as a constant, and no subscription
+/// would arise, and the panel would freeze forever in the state it had at
+/// launch. The same reasoning applies to musicModel too — it's also
+/// @Observable, and its properties (track/position/artwork/accent) are
+/// read right here, inside body (via content(for:), called directly from
+/// body), not ahead of time.
 private struct NotchRootView: View {
     let controller: NotchController
     let notchSize: CGSize
     let musicModel: MusicViewModel
-    /// `nil` у любой из трёх моделей ниже означает одно и то же: startStorage()
-    /// не смог поднять хранилище (см. её doc в AppDelegate) — соответствующая
-    /// вкладка в этом случае показывает TabPlaceholderView вместо содержимого.
+    /// `nil` on any of the three models below means the same thing:
+    /// startStorage() failed to set up storage (see its doc in AppDelegate) —
+    /// the corresponding tab shows TabPlaceholderView instead of content in
+    /// that case.
     let clipboardModel: ClipboardViewModel?
     let notesModel: NotesViewModel?
     let pinsModel: PinsViewModel?
 
-    /// Разрешение Accessibility, прочитанное на момент последней проверки.
-    /// AXIsProcessTrusted() не даёт уведомлений о своей выдаче, поэтому само
-    /// объявление этого свойства не гарантирует актуальность значения —
-    /// её держит цикл опроса в .task(id: isClipboardTabActive) ниже, пока
-    /// вкладка буфера открыта и разрешения ещё нет.
+    /// Accessibility permission, read as of the last check. AXIsProcessTrusted()
+    /// gives no notification when it's granted, so simply declaring this
+    /// property doesn't guarantee the value is current — that's kept up to
+    /// date by the polling loop in .task(id: isClipboardTabActive) below, as
+    /// long as the clipboard tab is open and permission hasn't been granted
+    /// yet.
     @State private var isAccessibilityTrusted = AccessibilityPermission.isTrusted
 
-    /// Минимальный промежуток между периодическими пересинхронизациями (см.
-    /// MusicViewModel.resync() и .task(id: isExpanded) ниже). Каждая дёргает
-    /// отдельный процесс perl — вшестеро чаще, чем раз в секунду, которым
-    /// тикает позиция трека, плодить их незачем.
+    /// Minimum interval between periodic resyncs (see MusicViewModel.resync()
+    /// and .task(id: isExpanded) below). Each one spawns a separate perl
+    /// process — there's no point spawning them six times more often than the
+    /// once-per-second tick that drives track position.
     private static let resyncInterval: TimeInterval = 5
 
-    /// Раскрыта ли панель, независимо от того, какая именно вкладка внутри.
-    /// Брифом задано именно такое условие для обновления позиции трека:
-    /// `if case .expanded = controller.state`, без привязки к вкладке.
+    /// Whether the panel is expanded, regardless of which tab is active inside
+    /// it. The brief specifies exactly this condition for updating track
+    /// position: `if case .expanded = controller.state`, with no tie to a
+    /// specific tab.
     private var isExpanded: Bool {
         if case .expanded = controller.state { return true }
         return false
     }
 
-    /// Раскрыта ли панель именно на вкладке буфера — в отличие от isExpanded
-    /// выше, здесь важна конкретная вкладка: лента должна перечитывать
-    /// историю при своём открытии, а не при любом раскрытии панели.
+    /// Whether the panel is expanded specifically on the clipboard tab —
+    /// unlike isExpanded above, the specific tab matters here: the feed should
+    /// reload history when it's opened, not on every panel expansion.
     private var isClipboardTabActive: Bool {
         if case .expanded(.clipboard) = controller.state { return true }
         return false
     }
 
-    /// Тот же принцип, что у isClipboardTabActive выше: заметки и пины
-    /// читаются заново при своём открытии, а не при любом раскрытии панели.
+    /// Same principle as isClipboardTabActive above: notes and pins are
+    /// reloaded when they're opened, not on every panel expansion.
     private var isNotesTabActive: Bool {
         if case .expanded(.notes) = controller.state { return true }
         return false
@@ -443,31 +450,30 @@ private struct NotchRootView: View {
             state: controller.state,
             notchSize: notchSize,
             accent: musicModel.accent,
-            // Тот же путь, что и клавиатура: клик по колонке вкладок и
-            // ⌘1…⌘4/⇥ оба заканчиваются одним и тем же handle(.selectTab(_:))
-            // на контроллере (см. PanelKeyHandler → KeyBinding → NotchPanel
-            // .keyDown(with:) для клавиатурной стороны).
+            // Same path as the keyboard: clicking the tab column and
+            // ⌘1…⌘4/⇥ both end up calling the same handle(.selectTab(_:))
+            // on the controller (see PanelKeyHandler → KeyBinding → NotchPanel
+            // .keyDown(with:) for the keyboard side).
             onSelectTab: { tab in controller.handle(.selectTab(tab)) }
         ) { tab in
             content(for: tab)
         }
         .task(id: isExpanded) {
-            // Позиция трека не хранится тикающей (см.
-            // MusicViewModel.refreshPosition) — кто-то обязан дёргать
-            // пересчёт периодически, пока панель действительно раскрыта.
-            // .task(id:) сам отменяет предыдущий прогон и не запускает
-            // новый, пока id не станет true: на закрытой и на приоткрытой
-            // (peek) панели цикл ниже не крутится вовсе, а не просто ничего
-            // не делает на каждом шаге — именно это спека называет «спать
-            // в покое».
+            // Track position isn't stored as ticking (see
+            // MusicViewModel.refreshPosition) — someone has to trigger a
+            // recompute periodically while the panel is actually expanded.
+            // .task(id:) cancels the previous run itself and doesn't start a new
+            // one until id becomes true: on a closed or peeked panel the loop
+            // below doesn't run at all, rather than just doing nothing on each
+            // step — that's exactly what the spec calls "sleeping at rest".
             guard isExpanded else { return }
-            // Пересинхронизация ровно один раз здесь, до входа в цикл, а не
-            // внутри while ниже: там она звала бы get на каждую секунду
-            // раскрытой панели, а это отдельный процесс perl на каждый тик
-            // (см. MusicViewModel.resync()). Этого разового вызова хватает
-            // на случай «интерцепция уже закончилась к моменту, когда
-            // пользователь открыл панель» — не дожидаясь первого тика
-            // периодической пересинхронизации в соседнем .task(id:) ниже.
+            // A resync exactly once here, before entering the loop, rather than
+            // inside the while below: there it would call get on every second of
+            // an expanded panel, and that's a separate perl process per tick (see
+            // MusicViewModel.resync()). This one-off call handles the case "the
+            // interception already ended by the time the user opened the panel" —
+            // without waiting for the first tick of the periodic resync in the
+            // neighboring .task(id:) below.
             await musicModel.resync()
             while !Task.isCancelled {
                 musicModel.refreshPosition()
@@ -475,14 +481,15 @@ private struct NotchRootView: View {
             }
         }
         .task(id: isExpanded) {
-            // Периодическая пересинхронизация — отдельным .task(id:) на том
-            // же isExpanded, а не веткой внутри секундного цикла позиции
-            // выше: у неё свой период (Self.resyncInterval, не чаще раза в
-            // 5 секунд — get поднимает отдельный процесс perl, ежесекундно
-            // так нельзя), и раздельные циклы не завязывают один период на
-            // другой. Ловит случай «интерцепция закончилась, пока панель уже
-            // была открыта» — разовый вызов в соседнем .task(id:) выше
-            // случается только в момент раскрытия и этот случай не видит.
+            // Periodic resync — a separate .task(id:) on the same isExpanded,
+            // rather than a branch inside the per-second position loop above: it
+            // has its own period (Self.resyncInterval, no more often than once
+            // every 5 seconds — get spawns a separate perl process, can't do that
+            // every second), and separate loops don't tie one period to the
+            // other. Catches the case "the interception ended while the panel was
+            // already open" — the one-off call in the neighboring .task(id:)
+            // above only happens at the moment of expansion and doesn't see this
+            // case.
             guard isExpanded else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Self.resyncInterval))
@@ -491,18 +498,17 @@ private struct NotchRootView: View {
             }
         }
         .task(id: isClipboardTabActive) {
-            // Не тикающий цикл, в отличие от позиции трека выше: истории
-            // буфера не нужно опрашивать раз в секунду, она читается один
-            // раз при открытии вкладки (решение №4 постановки) — .task(id:)
-            // и так перезапустит этот блок при каждом новом открытии, ничего
-            // отдельно повторять не нужно.
+            // Not a ticking loop, unlike track position above: clipboard history
+            // doesn't need polling once a second, it's read once when the tab is
+            // opened (decision #4 of the spec) — .task(id:) already restarts this
+            // block on every new opening, nothing extra needs to be repeated.
             guard isClipboardTabActive, let clipboardModel else { return }
             await clipboardModel.refresh()
         }
         .task(id: isNotesTabActive) {
-            // Тот же приём, что у буфера выше: не тикающий, читается один
-            // раз при открытии вкладки, .task(id:) перезапускает блок при
-            // каждом новом открытии.
+            // Same technique as the clipboard above: not ticking, read once when
+            // the tab is opened, .task(id:) restarts the block on every new
+            // opening.
             guard isNotesTabActive, let notesModel else { return }
             await notesModel.refresh()
         }
@@ -511,21 +517,20 @@ private struct NotchRootView: View {
             await pinsModel.refresh()
         }
         .task(id: isClipboardTabActive) {
-            // Тикающий цикл, в отличие от refresh() выше, — и здесь это
-            // обязательно, а не выбор стиля: уход курсора из раскрытой
-            // панели её не закрывает (см. NotchStateMachine — «работа с
-            // лентой буфера подразумевает движение мыши куда угодно»), а
-            // клик по «Открыть настройки» не бросает Esc и не жмёт хоткей.
-            // Значит пользователь может уйти в Настройки и вернуться, ни разу
-            // не покинув .expanded(.clipboard) — единственный способ
-            // подхватить выданное разрешение в этом случае без перезапуска
-            // приложения (решение №3 постановки задачи 10) — переопрашивать
-            // самим, пока вкладка буфера открыта. Раз в секунду — тот же
-            // порядок, что и у позиции трека в соседнем task(id:) выше.
-            // Проверка происходит сразу при входе на вкладку, без ожидания
-            // первого тика, и цикл останавливается сам, как только
-            // разрешение выдано: опрашивать после этого нечего, а в покое
-            // приложение обязано спать — то же правило, что и у refresh() выше.
+            // A ticking loop, unlike refresh() above — and here that's mandatory,
+            // not a style choice: the cursor leaving the expanded panel doesn't
+            // close it (see NotchStateMachine — "working with the clipboard feed
+            // implies the mouse can move anywhere"), and clicking "Open Settings"
+            // doesn't send Esc or press the hotkey. So the user can go to Settings
+            // and come back without ever leaving .expanded(.clipboard) — the only
+            // way to pick up the granted permission in this case without
+            // restarting the app (decision #3 of task 10's spec) is to keep
+            // polling ourselves while the clipboard tab is open. Once a second —
+            // the same cadence as track position in the neighboring task(id:)
+            // above. The check happens right away on entering the tab, without
+            // waiting for the first tick, and the loop stops itself as soon as
+            // permission is granted: nothing left to poll after that, and at
+            // rest the app must sleep — the same rule as refresh() above.
             guard isClipboardTabActive, clipboardModel != nil else { return }
             while !Task.isCancelled {
                 isAccessibilityTrusted = AccessibilityPermission.isTrusted
@@ -535,15 +540,16 @@ private struct NotchRootView: View {
         }
     }
 
-    /// Все четыре вкладки подключены по-настоящему — заглушка остаётся
-    /// только на случай отказа хранилища (см. её ветки ниже), не как place-
-    /// holder на будущее.
+    /// All four tabs are genuinely wired up — the placeholder remains only
+    /// for the case of a storage failure (see its branches below), not as a
+    /// stand-in for the future.
     ///
-    /// switch без default — намеренно. С default новый case NotchTab
-    /// молча провалился бы в заглушку без единой ошибки компиляции и без
-    /// падения теста: именно эта дыра описана в задаче про колонку вкладок.
-    /// Явные case делают то же самое надёжно — забытую вкладку поймает
-    /// компилятор, а не пользователь месяц спустя.
+    /// switch with no default — intentional. With a default, a new NotchTab
+    /// case would silently fall through to the placeholder with no compile
+    /// error and no test failure: that's exactly the hole described in the
+    /// task about the tab column. Explicit cases achieve the same thing
+    /// reliably — a forgotten tab gets caught by the compiler, not by a user
+    /// a month later.
     @ViewBuilder
     private func content(for tab: NotchTab) -> some View {
         switch tab {
@@ -561,29 +567,29 @@ private struct NotchRootView: View {
             if let clipboardModel {
                 clipboardContent(model: clipboardModel)
             } else {
-                // Вкладка готова, но хранилище не открылось (см. startStorage).
-                // «Скоро появится» здесь было бы неправдой о причине.
-                TabPlaceholderView(tab: tab, message: "Хранилище недоступно")
+                // The tab is ready, but storage didn't open (see startStorage).
+                // "Coming soon" here would misrepresent the reason.
+                TabPlaceholderView(tab: tab, message: "Storage unavailable")
             }
         case .notes:
             if let notesModel {
                 notesContent(model: notesModel)
             } else {
-                TabPlaceholderView(tab: tab, message: "Хранилище недоступно")
+                TabPlaceholderView(tab: tab, message: "Storage unavailable")
             }
         case .pins:
             if let pinsModel {
                 pinsContent(model: pinsModel)
             } else {
-                TabPlaceholderView(tab: tab, message: "Хранилище недоступно")
+                TabPlaceholderView(tab: tab, message: "Storage unavailable")
             }
         }
     }
 
-    /// Двусторонний биндинг черновика собран вручную, а не через
-    /// `@Bindable`: `notesModel` в этой вьюхе — константа (`let`), но это
-    /// ссылка на класс, и запись в `draft` через замыкание `set` меняет то
-    /// же самое живое состояние модели, которое читает `get`.
+    /// The draft's two-way binding is built by hand rather than via
+    /// `@Bindable`: `notesModel` in this view is a constant (`let`), but it's
+    /// a reference to a class, and writing to `draft` through the `set`
+    /// closure mutates the very same live model state that `get` reads.
     private func notesContent(model: NotesViewModel) -> some View {
         NotesTabView(
             rows: model.rows,
@@ -599,9 +605,9 @@ private struct NotchRootView: View {
         PinsTabView(
             chips: model.chips,
             onActivate: { id in
-                // pasteTarget, а не захват при развороте — та же причина,
-                // что у clipboardContent ниже: между разворотом и кликом
-                // пользователь успевает сменить активное приложение.
+                // pasteTarget, not a capture at expansion time — same reason as
+                // clipboardContent below: between expansion and the click, the user
+                // has time to switch the active app.
                 model.activate(id: id, frontmostApplication: controller.pasteTarget)
             },
             onCopyOnly: { id in model.copyOnly(id: id) },
@@ -610,10 +616,10 @@ private struct NotchRootView: View {
         )
     }
 
-    /// Лента или объяснение про разрешение — что из двух, решает чистая
-    /// функция ClipboardTabContent.resolve в NotchUI: здесь только читаем её
-    /// результат, а сам выбор проверен тестом без окна (см.
-    /// PermissionPromptViewTests).
+    /// The feed or an explanation about permission — which of the two is
+    /// decided by the pure function ClipboardTabContent.resolve in NotchUI:
+    /// here we just read its result, and the choice itself is covered by a
+    /// windowless test (see PermissionPromptViewTests).
     @ViewBuilder
     private func clipboardContent(model: ClipboardViewModel) -> some View {
         switch ClipboardTabContent.resolve(isAccessibilityTrusted: isAccessibilityTrusted) {
@@ -623,9 +629,9 @@ private struct NotchRootView: View {
                 selected: model.selectedID,
                 accent: musicModel.accent,
                 onActivate: { id in
-                    // pasteTarget, а не захваченное при развороте: между
-                    // разворотом и кликом пользователь успевает сменить
-                    // приложение, см. его doc в NotchController.
+                    // pasteTarget, not something captured at expansion time: between
+                    // expansion and the click, the user has time to switch apps, see its
+                    // doc in NotchController.
                     model.activate(id: id, frontmostApplication: controller.pasteTarget)
                 },
                 onCopyOnly: { id in model.copyOnly(id: id) }
@@ -633,12 +639,11 @@ private struct NotchRootView: View {
         case .permissionPrompt:
             PermissionPromptView(
                 onRequestPermission: {
-                    // Системный диалог — только по этому явному нажатию,
-                    // никогда сам по себе при запуске или раскрытии панели.
-                    // Возвращаемое значение присваиваем сразу: оно почти
-                    // всегда false (диалог только появился, пользователь ещё
-                    // не ответил), но если разрешение уже было выдано другим
-                    // путём — не заставляем ждать лишний тик опроса.
+                    // The system dialog — only from this explicit click, never on its own
+                    // at launch or panel expansion. We assign the return value right
+                    // away: it's almost always false (the dialog just appeared, the user
+                    // hasn't answered yet), but if permission was already granted some
+                    // other way, we don't make the user wait for an extra polling tick.
                     isAccessibilityTrusted = AccessibilityPermission.requestIfNeeded()
                 },
                 onOpenSettings: AccessibilityPermission.openSettings

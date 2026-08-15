@@ -1,19 +1,20 @@
 import AppKit
 import ClipboardKit
 
-/// Мост от NSPasteboard к чистым типам.
+/// Bridge from NSPasteboard to clean types.
 enum PasteboardReader {
-    /// Потолок на размер захватываемого файла — 50 МБ. Величина взята с
-    /// запасом на обычное: документы, архивы, картинки. Всё, что крупнее,
-    /// копируют не для того, чтобы вставлять из истории буфера.
+    /// Ceiling on the size of a captured file — 50 MB. The value has margin
+    /// for the usual case: documents, archives, images. Anything larger
+    /// is copied for reasons other than pasting back from clipboard history.
     static let maxFileBytes = 50 * 1024 * 1024
 
-    /// Прочитанное с пастборда.
+    /// What was read from the pasteboard.
     ///
-    /// У файла здесь только ссылка, а не содержимое: чтение байтов с диска —
-    /// работа не для главного потока, а `read()` вызывается именно с него.
-    /// Байты читает `ClipboardService` в фоновой задаче, и уже после фильтра
-    /// приватности, так что на отвергнутое содержимое ввод-вывод не тратится.
+    /// For a file, this holds only a reference, not the content: reading
+    /// bytes from disk isn't work for the main thread, yet `read()` is
+    /// called exactly from there. The bytes are read by `ClipboardService`
+    /// in a background task, and only after the privacy filter, so no I/O
+    /// is spent on rejected content.
     struct Content {
         let snapshot: PasteboardSnapshot
         let text: String?
@@ -22,33 +23,34 @@ enum PasteboardReader {
         let fileURL: URL?
     }
 
-    /// Читает пастборд. Только главный поток: `NSPasteboard` и
-    /// `NSWorkspace.frontmostApplication` — часть AppKit.
+    /// Reads the pasteboard. Main thread only: `NSPasteboard` and
+    /// `NSWorkspace.frontmostApplication` are part of AppKit.
     static func read() -> Content? {
         let pasteboard = NSPasteboard.general
         let types = (pasteboard.types ?? []).map(\.rawValue)
         let frontmost = NSWorkspace.shared.frontmostApplication
 
-        // Источник берётся из фронтового приложения в момент опроса, то есть
-        // до 0.4 с позже самого копирования. Если пользователь за это время
-        // успел переключиться, bundle id окажется от соседнего приложения.
-        // Устранить это нечем: публичного уведомления об изменении пастборда
-        // в macOS нет, остаётся опрос. На защиту от паролей неточность не
-        // влияет — её главный слой это маркер-типы, а они едут вместе с
-        // содержимым, а не берутся из окружения.
+        // The source is taken from the frontmost application at poll time,
+        // which is up to 0.4s after the copy itself. If the user switched
+        // apps in that window, the bundle id will belong to the neighboring
+        // app instead. Nothing can fix this: macOS has no public notification
+        // for pasteboard changes, so polling is all there is. This imprecision
+        // doesn't affect password protection — its main layer is the marker
+        // types, which travel with the content itself, not derived from the
+        // environment.
         let snapshot = PasteboardSnapshot(
             types: types,
             sourceBundleID: frontmost?.bundleIdentifier
         )
 
-        // Порядок важен: файл может нести и текстовое представление,
-        // и картинку-превью, а показать его надо файлом.
+        // Order matters: a file can carry both a text representation and a
+        // preview image, but it must be shown as a file.
         //
-        // Размер проверяется здесь, хотя читаться файл будет позже: это
-        // запрос метаданных, он дешёвый, и отсечь образ диска на несколько
-        // гигабайт лучше до того, как он попадёт в очередь на копирование
-        // в блобы. Крупные файлы просто не попадают в историю — честнее,
-        // чем класть в неё усечённую копию, которую нельзя вставить обратно.
+        // Size is checked here even though the file will be read later: this
+        // is a metadata request, it's cheap, and it's better to reject a
+        // multi-gigabyte disk image before it enters the queue for copying
+        // into blobs. Large files simply don't make it into history — more
+        // honest than storing a truncated copy that can't be pasted back.
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
            let url = urls.first, url.isFileURL,
            let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
