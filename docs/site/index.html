@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notchka — интерактивная чёлка для macOS</title>
+<meta name="description" content="Notchka превращает чёлку MacBook в панель управления музыкой, буфером обмена, заметками и закреплёнными сниппетами. Без единого сетевого запроса.">
+<link rel="icon" href="favicon.png">
+<style>
+  :root {
+    --color-bg: #030304;
+    --color-surface: #0c0c10;
+    --color-border: rgba(255, 255, 255, 0.08);
+    --color-text: rgba(255, 255, 255, 0.92);
+    --color-text-dim: rgba(255, 255, 255, 0.56);
+    --color-accent: oklch(68% 0.21 280);
+    --color-accent-soft: oklch(68% 0.21 280 / 0.16);
+
+    --text-hero: clamp(2.5rem, 1.6rem + 4vw, 4.5rem);
+    --text-lead: clamp(1.05rem, 0.95rem + 0.5vw, 1.25rem);
+
+    --space-section: clamp(3.5rem, 2.5rem + 4vw, 7rem);
+
+    --duration-normal: 300ms;
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main { overflow-x: hidden; }
+
+  a { color: inherit; }
+
+  .glow-field {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(600px 400px at 50% 0%, var(--color-accent-soft), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header.hero {
+    position: relative;
+    padding: var(--space-section) 1.5rem calc(var(--space-section) * 0.7);
+    text-align: center;
+  }
+
+  .hero-content { position: relative; z-index: 1; max-width: 640px; margin: 0 auto; }
+
+  .logo {
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 1.75rem;
+    display: block;
+    filter: drop-shadow(0 0 40px var(--color-accent-soft));
+  }
+
+  h1 {
+    font-size: var(--text-hero);
+    font-weight: 650;
+    letter-spacing: -0.03em;
+    margin: 0 0 0.75rem;
+    background: linear-gradient(180deg, #fff, rgba(255,255,255,0.72));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .lead {
+    font-size: var(--text-lead);
+    color: var(--color-text-dim);
+    line-height: 1.55;
+    margin: 0 auto 2.25rem;
+    max-width: 46ch;
+  }
+
+  .cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .btn-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.85rem 1.6rem;
+    border-radius: 999px;
+    background: var(--color-accent);
+    color: #05050a;
+    font-weight: 600;
+    font-size: 1rem;
+    text-decoration: none;
+    transition: transform var(--duration-normal) var(--ease-out-expo),
+                box-shadow var(--duration-normal) var(--ease-out-expo);
+    box-shadow: 0 8px 30px -8px var(--color-accent);
+  }
+  .btn-download:hover { transform: translateY(-2px); box-shadow: 0 14px 36px -8px var(--color-accent); }
+  .btn-download:active { transform: translateY(0); }
+  .btn-download .version { opacity: 0.7; font-weight: 500; }
+
+  .btn-secondary {
+    padding: 0.85rem 1.4rem;
+    border-radius: 999px;
+    border: 1px solid var(--color-border);
+    text-decoration: none;
+    color: var(--color-text-dim);
+    font-size: 0.95rem;
+    transition: border-color var(--duration-normal) var(--ease-out-expo),
+                color var(--duration-normal) var(--ease-out-expo);
+  }
+  .btn-secondary:hover { border-color: rgba(255,255,255,0.24); color: var(--color-text); }
+
+  .download-meta {
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: var(--color-text-dim);
+  }
+  .download-meta strong { color: var(--color-text); font-variant-numeric: tabular-nums; }
+
+  section.features {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 0 1.5rem var(--space-section);
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: var(--color-border);
+    border: 1px solid var(--color-border);
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .feature {
+    background: var(--color-surface);
+    padding: 1.75rem 1.5rem;
+  }
+  .feature:last-child { grid-column: 1 / -1; }
+
+  @media (max-width: 520px) {
+    section.features { grid-template-columns: 1fr; }
+    .feature:last-child { grid-column: auto; }
+  }
+  .feature h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.02rem;
+    font-weight: 600;
+  }
+  .feature p {
+    margin: 0;
+    font-size: 0.92rem;
+    line-height: 1.5;
+    color: var(--color-text-dim);
+  }
+
+  section.privacy {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 0 1.5rem var(--space-section);
+    text-align: center;
+  }
+  section.privacy h2 {
+    font-size: 1.4rem;
+    margin: 0 0 0.75rem;
+  }
+  section.privacy p {
+    color: var(--color-text-dim);
+    line-height: 1.6;
+    font-size: 0.95rem;
+  }
+
+  footer {
+    border-top: 1px solid var(--color-border);
+    padding: 2rem 1.5rem;
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--color-text-dim);
+  }
+  footer a { text-decoration: underline; text-decoration-color: var(--color-border); }
+  footer a:hover { text-decoration-color: currentColor; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .btn-download { transition: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div class="glow-field" aria-hidden="true"></div>
+    <div class="hero-content">
+      <img class="logo" src="logo.png" alt="" width="96" height="96">
+      <h1>Notchka</h1>
+      <p class="lead">
+        Чёлка MacBook как интерактивная панель: музыка из любого источника, история
+        буфера обмена, быстрые заметки и закреплённые сниппеты. Без единого сетевого
+        запроса.
+      </p>
+      <div class="cta-row">
+        <a class="btn-download" id="download-link" href="#" rel="noopener">
+          <span>Скачать для macOS</span>
+          <span class="version" id="download-version"></span>
+        </a>
+        <a class="btn-secondary" id="releases-link" href="#" rel="noopener">Все релизы</a>
+      </div>
+      <p class="download-meta" id="download-meta" hidden>
+        Скачано <strong id="download-count">—</strong> раз
+      </p>
+    </div>
+  </header>
+
+  <section class="features" aria-label="Возможности">
+    <article class="feature">
+      <h3>Музыка отовсюду</h3>
+      <p>Apple Music, Spotify, YouTube в браузере — пауза, переключение, обложка и прогресс без расширений.</p>
+    </article>
+    <article class="feature">
+      <h3>Буфер обмена</h3>
+      <p>Текст, изображения, файлы с указанием источника. Пароли в ленту не попадают.</p>
+    </article>
+    <article class="feature">
+      <h3>Быстрые заметки</h3>
+      <p>Короткий текст под рукой, без отдельного приложения и лишних кликов.</p>
+    </article>
+    <article class="feature">
+      <h3>Закреплённые сниппеты</h3>
+      <p>Почта, номер, другие частые значения. Клик вставляет, ⌥+клик копирует.</p>
+    </article>
+    <article class="feature">
+      <h3>Общий поиск</h3>
+      <p>Один запрос находит запись из буфера, заметку и пин одновременно.</p>
+    </article>
+  </section>
+
+  <section class="privacy">
+    <h2>Приватность по умолчанию</h2>
+    <p>
+      Notchka не делает ни одного сетевого запроса — ни телеметрии, ни аналитики, ни
+      проверки обновлений. Все данные остаются локально на диске. Число скачиваний выше
+      считает сам GitHub на своей стороне: приложение об этой странице ничего не знает.
+    </p>
+  </section>
+</main>
+
+<footer>
+  <p>
+    <a href="https://github.com/OWNER/REPO" rel="noopener">Исходный код на GitHub</a>
+    · MIT License
+  </p>
+</footer>
+
+<script>
+  // TODO: заменить OWNER/REPO на реальный путь репозитория после публикации.
+  const REPO = "OWNER/REPO";
+
+  const downloadLink = document.getElementById("download-link");
+  const downloadVersion = document.getElementById("download-version");
+  const releasesLink = document.getElementById("releases-link");
+  const downloadMeta = document.getElementById("download-meta");
+  const downloadCount = document.getElementById("download-count");
+
+  releasesLink.href = `https://github.com/${REPO}/releases`;
+  downloadLink.href = `https://github.com/${REPO}/releases/latest`;
+
+  fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
+    .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+    .then((release) => {
+      const dmgAsset = release.assets.find((asset) => asset.name.endsWith(".dmg"));
+      if (dmgAsset) {
+        downloadLink.href = dmgAsset.browser_download_url;
+        downloadVersion.textContent = release.tag_name;
+        downloadMeta.hidden = false;
+        downloadCount.textContent = dmgAsset.download_count.toLocaleString("ru-RU");
+      }
+    })
+    .catch(() => {
+      // Сеть недоступна или лимит GitHub API — ссылка на страницу релизов
+      // (уже проставлена выше) остаётся рабочим запасным вариантом.
+    });
+</script>
+</body>
+</html>

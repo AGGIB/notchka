@@ -24,3 +24,6 @@ vendor/mediaremote-adapter/.build/
 
 # XcodeGen генерирует проект из project.yml
 Notchka.xcodeproj/
+
+# Отладочные артефакты локального превью через Playwright MCP
+.playwright-mcp/
