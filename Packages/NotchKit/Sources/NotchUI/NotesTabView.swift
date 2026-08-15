@@ -211,6 +211,15 @@ private struct NoteComposerView: View {
         }
     }
 
+    /// Отступ сверху для настоящего текста внутри TextEditor и для
+    /// плейсхолдера поверх него — одна константа на двоих, а не два
+    /// независимых числа. TextEditor рисует курсор по своему встроенному
+    /// внутреннему отступу, который меньше восьми пунктов; без этой
+    /// добавки набранный текст начинался бы выше, чем обещает положение
+    /// плейсхолдера, и они бы визуально разъезжались в момент первого
+    /// нажатия клавиши.
+    private static let textTopInset: CGFloat = 8
+
     private var field: some View {
         TextEditor(text: $text)
             .font(.system(size: 12))
@@ -218,6 +227,7 @@ private struct NoteComposerView: View {
             // Без этого TextEditor рисует свой непрозрачный системный фон
             // поверх чёрной панели — на «Обсидиане» это выглядело бы дырой.
             .scrollContentBackground(.hidden)
+            .padding(.top, Self.textTopInset)
             .frame(height: Self.fieldHeight)
             // TextEditor на macOS — известный баг SwiftUI: заданная .frame
             // высота ограничивает то, что о размере узнаёт родитель, но не
@@ -231,7 +241,7 @@ private struct NoteComposerView: View {
                     Text("Новая заметка…")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.3))
-                        .padding(.top, 8)
+                        .padding(.top, Self.textTopInset)
                         .padding(.leading, 5)
                         .allowsHitTesting(false)
                 }
