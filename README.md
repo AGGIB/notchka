@@ -74,7 +74,7 @@ System Settings.
 Требования: macOS 26+, Xcode 26.6+, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```bash
-git clone https://github.com/<org>/notchka.git
+git clone https://github.com/AGGIB/notchka.git
 cd notchka
 xcodegen generate
 open Notchka.xcodeproj
